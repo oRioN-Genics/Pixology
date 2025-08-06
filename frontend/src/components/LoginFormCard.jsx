@@ -10,20 +10,10 @@ const LoginFormCard = () => {
         {/* Left Side: Login Form */}
         <div className="w-full md:w-1/2 flex items-center justify-center">
           <div className="max-w-[320px] w-full px-4 py-6">
-            <h2 className="text-4xl font-bold text-black mb-6 text-center">
-              Welcome to Pixology!
+            <h2 className="text-5xl font-bold text-black mb-6 text-center">
+              Welcome Back!
             </h2>
             <form className="flex flex-col gap-4">
-              {/* Username */}
-              <div>
-                <label className="text-sm text-black">Username:</label>
-                <input
-                  type="username"
-                  placeholder="Enter your name"
-                  className="w-full px-4 py-2 rounded-md mt-1 text-black bg-white"
-                />
-              </div>
-
               {/* Email */}
               <div>
                 <label className="text-sm text-black">Email:</label>
@@ -52,15 +42,18 @@ const LoginFormCard = () => {
 
               {/* Log in Button */}
               <BlueButton variant="primary" className="w-full mt-2">
-                Sign up
+                Log in
               </BlueButton>
             </form>
 
             {/* Sign-up link */}
             <p className="mt-4 text-sm text-center text-black">
-              Already have an account?{" "}
-              <a href="#" className="text-[#4D9FDC] font-semibold">
-                Sign in
+              Don’t have an account?{" "}
+              <a
+                href="#"
+                className="text-[#4D9FDC] font-semibold hover:underline"
+              >
+                Sign up
               </a>
             </p>
           </div>

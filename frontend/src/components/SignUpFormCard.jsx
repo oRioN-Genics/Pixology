@@ -10,10 +10,20 @@ const LoginFormCard = () => {
         {/* Left Side: Login Form */}
         <div className="w-full md:w-1/2 flex items-center justify-center">
           <div className="max-w-[320px] w-full px-4 py-6">
-            <h2 className="text-5xl font-bold text-black mb-6 text-center">
-              Welcome Back!
+            <h2 className="text-4xl font-bold text-black mb-6 text-center">
+              Welcome to Pixology!
             </h2>
             <form className="flex flex-col gap-4">
+              {/* Username */}
+              <div>
+                <label className="text-sm text-black">Username:</label>
+                <input
+                  type="username"
+                  placeholder="Enter your name"
+                  className="w-full px-4 py-2 rounded-md mt-1 text-black bg-white"
+                />
+              </div>
+
               {/* Email */}
               <div>
                 <label className="text-sm text-black">Email:</label>
@@ -42,15 +52,18 @@ const LoginFormCard = () => {
 
               {/* Log in Button */}
               <BlueButton variant="primary" className="w-full mt-2">
-                Log in
+                Sign up
               </BlueButton>
             </form>
 
             {/* Sign-up link */}
             <p className="mt-4 text-sm text-center text-black">
-              Don’t have an account?{" "}
-              <a href="#" className="text-[#4D9FDC] font-semibold">
-                Sign up
+              Already have an account?{" "}
+              <a
+                href="#"
+                className="text-[#4D9FDC] font-semibold hover:underline"
+              >
+                Sign in
               </a>
             </p>
           </div>
@@ -61,9 +74,9 @@ const LoginFormCard = () => {
       <div className="absolute top-0 right-0 h-full w-full md:w-1/2 p-4 md:p-0">
         <div className="bg-white rounded-[20px] h-full flex flex-col md:flex-row items-center gap-10 p-10">
           <img
-            src={assets.Warrior_1}
+            src={assets.Warrior_2}
             alt="Pixel Character"
-            className="w-[220px] h-auto md:w-[400px] lg:w-[600px] opacity-80 ml-[-95px]"
+            className="w-[220px] h-auto md:w-[400px] lg:w-[600px] opacity-80 ml-[-105px]"
           />
         </div>
       </div>

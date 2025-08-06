@@ -3,6 +3,7 @@ import CuteGhost_1 from "./CuteGhost_1.png";
 import CuteGhost_2 from "./CuteGhost_2.png";
 import Warrior_1 from "./Warrior_1.png";
 import Warrior_2 from "./Warrior_2.png";
+import ExportIcon from "./ExportIcon.png";
 
 export const assets = {
   Icon,
@@ -10,4 +11,5 @@ export const assets = {
   CuteGhost_2,
   Warrior_1,
   Warrior_2,
+  ExportIcon,
 };

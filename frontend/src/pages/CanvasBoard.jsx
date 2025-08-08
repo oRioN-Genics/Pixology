@@ -5,6 +5,7 @@ import LeftPanel from "../components/LeftPanel";
 import ToolButton from "../components/ToolButton";
 import LayersPanel from "../components/LayersPanel";
 import ColorPicker from "../components/ColorPicker";
+import Toast from "../components/Toast";
 import { useLocation } from "react-router-dom";
 import { assets } from "../assets";
 
@@ -16,6 +17,9 @@ const CanvasBoard = () => {
   const [currentColor, setCurrentColor] = useState("#000000");
   const [showColorPicker, setShowColorPicker] = useState(false);
 
+  // toast
+  const [toastMsg, setToastMsg] = useState("");
+
   const tools = useMemo(
     () => [
       { id: "hand", label: "Move", icon: assets.handIcon },
@@ -23,7 +27,6 @@ const CanvasBoard = () => {
       { id: "eraser", label: "Eraser", icon: assets.eraserIcon },
       { id: "fill", label: "Fill", icon: assets.fillIcon },
       { id: "picker", label: "Color Picker", icon: assets.colorPickerIcon },
-      { id: "zoom", label: "Zoom", icon: assets.zoomIcon },
       { id: "undo", label: "Undo", icon: assets.undoIcon },
       { id: "redo", label: "Redo", icon: assets.redoIcon },
     ],
@@ -36,22 +39,18 @@ const CanvasBoard = () => {
       return;
     }
     setSelectedTool(id);
-
-    // Open color picker when clicking Pencil or Fill
-    if (id === "pencil" || id === "fill") {
-      setShowColorPicker(true);
-    } else if (id === "picker") {
-      // We'll wire this to pick from canvas later
+    if (id === "pencil" || id === "fill" || id === "picker") {
       setShowColorPicker(true);
     } else {
       setShowColorPicker(false);
     }
   };
 
-  // Layers (unchanged)
+  // Layers
   const [layers, setLayers] = useState([
     { id: "l1", name: "Layer 1", visible: true, locked: false },
   ]);
+  // Select first layer by default
   const [selectedLayerId, setSelectedLayerId] = useState("l1");
 
   const addLayer = () => {
@@ -80,10 +79,12 @@ const CanvasBoard = () => {
     }
   };
   const deleteLayer = (id) => {
-    setLayers((ls) => ls.filter((l) => l.id !== id));
-    if (selectedLayerId === id) {
-      setSelectedLayerId((ls) => layers.find((l) => l.id !== id)?.id ?? "");
-    }
+    setLayers((ls) => {
+      const filtered = ls.filter((l) => l.id !== id);
+      // adjust selected layer if needed
+      setSelectedLayerId((cur) => (cur === id ? filtered[0]?.id ?? null : cur));
+      return filtered;
+    });
   };
 
   return (
@@ -133,11 +134,17 @@ const CanvasBoard = () => {
               width={width}
               height={height}
               selectedTool={selectedTool}
-              color={currentColor} // <-- we'll use this to draw next
-              activeLayerId={selectedLayerId} // <-- for later
+              color={currentColor}
+              activeLayerId={selectedLayerId}
+              layers={layers}
+              onRequireLayer={(msg) => setToastMsg(msg)}
+              onPickColor={(hex) => {
+                if (hex) setCurrentColor(hex);
+                setShowColorPicker(true); // keep picker open to tweak
+              }}
             />
 
-            {/* Color Picker popover (positioned near canvas) */}
+            {/* Color Picker popover */}
             {showColorPicker && (
               <div className="absolute left-0 top-0 mt-2">
                 <ColorPicker
@@ -154,6 +161,9 @@ const CanvasBoard = () => {
           </div>
         </div>
       </div>
+
+      {/* Toast */}
+      {toastMsg && <Toast message={toastMsg} onClose={() => setToastMsg("")} />}
     </div>
   );
 };

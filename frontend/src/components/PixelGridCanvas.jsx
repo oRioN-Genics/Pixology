@@ -1,8 +1,57 @@
 import React, { useRef, useState, useEffect, useMemo } from "react";
 
-const PixelGridCanvas = ({ width, height, selectedTool, color }) => {
+const PixelGridCanvas = ({
+  width,
+  height,
+  selectedTool,
+  color,
+  activeLayerId,
+  layers = [],
+  onRequireLayer,
+  onPickColor, // ⬅️ eyedropper callback
+}) => {
   const cellSize = 30;
 
+  // ---- Fill options (tweak later via UI if you want) ----
+  const FILL = { tolerance: 0, contiguous: true, sampleAllLayers: false };
+
+  // ---- Color helpers ----
+  const hexToRgb = (hex) => {
+    if (!hex) return null;
+    let h = hex.replace("#", "");
+    if (h.length === 3)
+      h = h
+        .split("")
+        .map((c) => c + c)
+        .join("");
+    if (h.length !== 6) return null;
+    return {
+      r: parseInt(h.slice(0, 2), 16),
+      g: parseInt(h.slice(2, 4), 16),
+      b: parseInt(h.slice(4, 6), 16),
+    };
+  };
+  const rgbDistSq = (a, b) => {
+    const dr = a.r - b.r,
+      dg = a.g - b.g,
+      db = a.b - b.b;
+    return dr * dr + dg * dg + db * db;
+  };
+  const matchesColor = (targetHex, candidateHex, tolerance) => {
+    // Transparent: equal only if both null when tolerance=0
+    if (targetHex === null || candidateHex === null) {
+      return tolerance === 0 ? targetHex === candidateHex : false;
+    }
+    if (tolerance <= 0)
+      return targetHex.toLowerCase() === candidateHex.toLowerCase();
+    const t = hexToRgb(targetHex);
+    const c = hexToRgb(candidateHex);
+    if (!t || !c) return false;
+    const tSq = tolerance * tolerance;
+    return rgbDistSq(t, c) <= tSq;
+  };
+
+  // static cell refs
   const grid = useMemo(
     () =>
       Array.from({ length: height }, (_, row) =>
@@ -14,7 +63,7 @@ const PixelGridCanvas = ({ width, height, selectedTool, color }) => {
   const containerRef = useRef(null);
   const gridRef = useRef(null);
 
-  // --- pan/zoom state ---
+  // ------ pan/zoom state ------
   const [isDragging, setIsDragging] = useState(false);
   const [dragSource, setDragSource] = useState(null); // 'hand' | 'middle' | null
   const [lastMousePos, setLastMousePos] = useState({ x: 0, y: 0 });
@@ -25,33 +74,140 @@ const PixelGridCanvas = ({ width, height, selectedTool, color }) => {
   const handlePointerEnter = () => setIsPointerInside(true);
   const handlePointerLeave = () => setIsPointerInside(false);
 
-  // --- pixel color buffer ---
-  const [pixels, setPixels] = useState(() =>
+  // ------ per-layer pixel buffers ------
+  // Map<layerId, string[][]> hex or null
+  const [buffers, setBuffers] = useState(() => new Map());
+  const makeBlank = () =>
     Array.from({ length: height }, () =>
       Array.from({ length: width }, () => null)
-    )
-  );
-  useEffect(() => {
-    setPixels(
-      Array.from({ length: height }, () =>
-        Array.from({ length: width }, () => null)
-      )
     );
-  }, [width, height]);
 
-  const paintAt = (row, col, hexOrNull) => {
+  useEffect(() => {
+    setBuffers((prev) => {
+      const next = new Map(prev);
+      // create buffers for new layers
+      layers.forEach((ly) => {
+        if (!next.has(ly.id)) next.set(ly.id, makeBlank());
+      });
+      // drop buffers for removed layers
+      for (const id of Array.from(next.keys())) {
+        if (!layers.some((ly) => ly.id === id)) next.delete(id);
+      }
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layers, width, height]);
+
+  // mutate one pixel in a specific layer
+  const paintAt = (layerId, row, col, hexOrNull) => {
     if (row < 0 || col < 0 || row >= height || col >= width) return;
-    setPixels((prev) => {
-      const next = prev.map((r) => r.slice());
-      next[row][col] = hexOrNull; // null = clear
+    setBuffers((prev) => {
+      const next = new Map(prev);
+      const layerBuf = next.get(layerId);
+      if (!layerBuf) return prev;
+      const rowCopy = layerBuf[row].slice();
+      rowCopy[col] = hexOrNull;
+      const newLayer = layerBuf.slice();
+      newLayer[row] = rowCopy;
+      next.set(layerId, newLayer);
       return next;
     });
   };
 
+  // composite visible layers: first non-null from topmost (layers[0] is top)
+  const compositeAt = (row, col) => {
+    for (const ly of layers) {
+      if (!ly.visible) continue;
+      const buf = buffers.get(ly.id);
+      const px = buf?.[row]?.[col];
+      if (px) return px;
+    }
+    return null;
+  };
+
+  // Flood fill (contiguous; tolerance-ready; can sample all layers)
+  const floodFill = (
+    layerId,
+    startRow,
+    startCol,
+    newHex,
+    { tolerance, contiguous, sampleAllLayers }
+  ) => {
+    const lyBuf = buffers.get(layerId);
+    if (!lyBuf) return;
+
+    const getAt = (r, c) =>
+      sampleAllLayers ? compositeAt(r, c) : lyBuf?.[r]?.[c] ?? null;
+    const targetHex = getAt(startRow, startCol);
+
+    // If target ~ new color, do nothing
+    if (matchesColor(targetHex, newHex, tolerance)) return;
+
+    const visited = new Uint8Array(width * height);
+    const mark = (r, c) => {
+      visited[r * width + c] = 1;
+    };
+    const seen = (r, c) => visited[r * width + c] === 1;
+
+    const q = [[startRow, startCol]];
+    mark(startRow, startCol);
+
+    const edits = [];
+    const tryPush = (r, c) => {
+      if (r < 0 || c < 0 || r >= height || c >= width) return;
+      if (seen(r, c)) return;
+      const cand = getAt(r, c);
+      if (matchesColor(targetHex, cand, tolerance)) {
+        mark(r, c);
+        q.push([r, c]);
+      }
+    };
+
+    while (q.length) {
+      const [r, c] = q.pop();
+      edits.push([r, c]);
+      if (contiguous) {
+        tryPush(r + 1, c);
+        tryPush(r - 1, c);
+        tryPush(r, c + 1);
+        tryPush(r, c - 1);
+      }
+    }
+
+    setBuffers((prev) => {
+      const next = new Map(prev);
+      const buf = next.get(layerId);
+      if (!buf) return prev;
+      const newLayer = buf.map((row) => row.slice());
+      for (const [r, c] of edits) newLayer[r][c] = newHex;
+      next.set(layerId, newLayer);
+      return next;
+    });
+  };
+
+  // ------ drawing guard ------
+  const ensureDrawableLayer = () => {
+    const ly = layers.find((l) => l.id === activeLayerId);
+    if (!activeLayerId || !ly) {
+      onRequireLayer?.("Select a layer to draw.");
+      return null;
+    }
+    if (ly.locked) {
+      onRequireLayer?.("Selected layer is locked.");
+      return null;
+    }
+    if (!ly.visible) {
+      onRequireLayer?.("Selected layer is hidden.");
+      return null;
+    }
+    return ly;
+  };
+
+  // ------ interactions ------
   const [isDrawing, setIsDrawing] = useState(false);
 
-  // Mouse down on container (for panning)
   const handleMouseDown = (e) => {
+    // middle mouse panning
     if (e.button === 1) {
       e.preventDefault();
       setIsDragging(true);
@@ -60,6 +216,7 @@ const PixelGridCanvas = ({ width, height, selectedTool, color }) => {
       document.body.style.cursor = "grabbing";
       return;
     }
+    // left mouse panning (hand)
     if (e.button === 0 && selectedTool === "hand") {
       e.preventDefault();
       setIsDragging(true);
@@ -81,14 +238,15 @@ const PixelGridCanvas = ({ width, height, selectedTool, color }) => {
   const handleMouseUp = () => {
     setIsDragging(false);
     setDragSource(null);
-    setIsDrawing(false); // stop drawing/erasing drags
+    setIsDrawing(false);
     document.body.style.cursor = "default";
   };
 
-  // Wheel zoom
+  // wheel zoom
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
+
     const handleWheel = (e) => {
       if (!isPointerInside) return;
       e.preventDefault();
@@ -99,11 +257,12 @@ const PixelGridCanvas = ({ width, height, selectedTool, color }) => {
         return Math.min(4, Math.max(0.5, next));
       });
     };
+
     el.addEventListener("wheel", handleWheel, { passive: false });
     return () => el.removeEventListener("wheel", handleWheel);
   }, [isPointerInside]);
 
-  // Cursor: hand shows grab/grabbing; otherwise crosshair while drawing tools are active
+  // cursor
   const cursorStyle =
     selectedTool === "hand"
       ? isDragging
@@ -111,31 +270,66 @@ const PixelGridCanvas = ({ width, height, selectedTool, color }) => {
         : "grab"
       : isDragging && dragSource === "middle"
       ? "grabbing"
+      : selectedTool === "picker"
+      ? "crosshair"
       : "crosshair";
 
-  // --- Cell handlers: pencil + eraser ---
+  // cell handlers (pencil / eraser / fill / picker)
   const onCellMouseDown = (row, col) => (e) => {
-    if (e.button !== 0) return; // left only
-    if (selectedTool === "pencil") {
+    if (e.button !== 0) return;
+
+    // Eyedropper: sample composited color, no layer required
+    if (selectedTool === "picker") {
       e.preventDefault();
-      paintAt(row, col, color || "#000000");
-      setIsDrawing(true);
-    } else if (selectedTool === "eraser") {
-      // NEW
-      e.preventDefault();
-      paintAt(row, col, null); // NEW (clear pixel)
-      setIsDrawing(true); // NEW (drag to keep erasing)
+      const sampled = compositeAt(row, col);
+      if (sampled) {
+        onPickColor?.(sampled);
+      } else {
+        // optional: nudge if transparent
+        onRequireLayer?.("No color at this pixel (transparent).");
+      }
+      return;
     }
-    // (fill/picker to be added later)
+
+    // Drawing tools require valid active layer
+    if (
+      selectedTool === "pencil" ||
+      selectedTool === "eraser" ||
+      selectedTool === "fill"
+    ) {
+      const ly = ensureDrawableLayer();
+      if (!ly) return;
+
+      e.preventDefault();
+
+      if (selectedTool === "pencil") {
+        paintAt(ly.id, row, col, color || "#000000");
+        setIsDrawing(true);
+      } else if (selectedTool === "eraser") {
+        paintAt(ly.id, row, col, null);
+        setIsDrawing(true);
+      } else if (selectedTool === "fill") {
+        floodFill(
+          ly.id,
+          row,
+          col,
+          color || "#000000",
+          FILL // { tolerance, contiguous, sampleAllLayers }
+        );
+      }
+    }
   };
 
-  const onCellMouseEnter = (row, col) => (e) => {
+  const onCellMouseEnter = (row, col) => () => {
     if (!isDrawing) return;
-    if (selectedTool === "pencil") {
-      paintAt(row, col, color || "#000000");
-    } else if (selectedTool === "eraser") {
-      // NEW
-      paintAt(row, col, null); // NEW
+    if (selectedTool === "pencil" || selectedTool === "eraser") {
+      const ly = ensureDrawableLayer();
+      if (!ly) return;
+      if (selectedTool === "pencil") {
+        paintAt(ly.id, row, col, color || "#000000");
+      } else {
+        paintAt(ly.id, row, col, null);
+      }
     }
   };
 
@@ -166,9 +360,10 @@ const PixelGridCanvas = ({ width, height, selectedTool, color }) => {
         {grid.map((row, rowIndex) => (
           <div key={rowIndex} className="flex">
             {row.map(({ row, col }) => {
+              const px = compositeAt(row, col); // composited preview
               const isLight = (row + col) % 2 === 0;
               const baseColor = isLight ? "#e6f0ff" : "#dfe9f5";
-              const pixel = pixels[row][col];
+
               return (
                 <div
                   key={`${row}-${col}`}
@@ -176,7 +371,7 @@ const PixelGridCanvas = ({ width, height, selectedTool, color }) => {
                   style={{
                     width: `${cellSize}px`,
                     height: `${cellSize}px`,
-                    backgroundColor: pixel ?? baseColor,
+                    backgroundColor: px ?? baseColor,
                   }}
                   onMouseDown={onCellMouseDown(row, col)}
                   onMouseEnter={onCellMouseEnter(row, col)}

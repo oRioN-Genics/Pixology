@@ -11,7 +11,6 @@ import pencilIcon from "./tools/pencilIcon.png";
 import eraserIcon from "./tools/eraserIcon.png";
 import fillIcon from "./tools/fillIcon.png";
 import colorPickerIcon from "./tools/eyedropperIcon.png";
-import zoomIcon from "./tools/zoomIcon.png";
 import undoIcon from "./tools/undoIcon.png";
 import redoIcon from "./tools/redoIcon.png";
 
@@ -27,7 +26,6 @@ export const assets = {
   eraserIcon,
   fillIcon,
   colorPickerIcon,
-  zoomIcon,
   undoIcon,
   redoIcon,
 };

@@ -5,7 +5,7 @@ import Warrior_1 from "./Warrior_1.png";
 import Warrior_2 from "./Warrior_2.png";
 import ExportIcon from "./ExportIcon.png";
 
-// toolbar icons
+// tools
 import handIcon from "./tools/handIcon.png";
 import pencilIcon from "./tools/pencilIcon.png";
 import eraserIcon from "./tools/eraserIcon.png";

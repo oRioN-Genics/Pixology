@@ -3,7 +3,8 @@ import PixelGridCanvas from "../components/PixelGridCanvas";
 import NavBar from "../components/NavBar";
 import LeftPanel from "../components/LeftPanel";
 import ToolButton from "../components/ToolButton";
-import LayersPanel from "../components/LayersPanel"; // ⬅️ make sure this exists
+import LayersPanel from "../components/LayersPanel";
+import ColorPicker from "../components/ColorPicker";
 import { useLocation } from "react-router-dom";
 import { assets } from "../assets";
 
@@ -12,6 +13,8 @@ const CanvasBoard = () => {
   const { width, height } = location.state || { width: 16, height: 16 };
 
   const [selectedTool, setSelectedTool] = useState("pencil");
+  const [currentColor, setCurrentColor] = useState("#000000");
+  const [showColorPicker, setShowColorPicker] = useState(false);
 
   const tools = useMemo(
     () => [
@@ -33,9 +36,19 @@ const CanvasBoard = () => {
       return;
     }
     setSelectedTool(id);
+
+    // Open color picker when clicking Pencil or Fill
+    if (id === "pencil" || id === "fill") {
+      setShowColorPicker(true);
+    } else if (id === "picker") {
+      // We'll wire this to pick from canvas later
+      setShowColorPicker(true);
+    } else {
+      setShowColorPicker(false);
+    }
   };
 
-  // --- basic layers state (you can replace with your actual data) ---
+  // Layers (unchanged)
   const [layers, setLayers] = useState([
     { id: "l1", name: "Layer 1", visible: true, locked: false },
   ]);
@@ -68,23 +81,19 @@ const CanvasBoard = () => {
   };
   const deleteLayer = (id) => {
     setLayers((ls) => ls.filter((l) => l.id !== id));
-    if (selectedLayerId === id)
+    if (selectedLayerId === id) {
       setSelectedLayerId((ls) => layers.find((l) => l.id !== id)?.id ?? "");
+    }
   };
-  // -------------------------------------------------------------------
 
   return (
     <div className="relative min-h-screen">
-      {/* Background */}
       <div className="absolute inset-0 bg-gray-100" />
-
-      {/* Foreground content */}
       <div className="relative z-10">
         <NavBar showOnlySignUp showOnlyLogin showExportButton />
 
-        {/* Fixed right-edge Layers panel */}
+        {/* Right-edge Layers panel */}
         <div className="fixed right-4 top-28 z-20">
-          {/* match these widths with the padding-right below */}
           <LayersPanel
             className="w-60 sm:w-64 md:w-72 max-h-[70vh] overflow-y-auto"
             layers={layers}
@@ -98,13 +107,9 @@ const CanvasBoard = () => {
           />
         </div>
 
-        {/* Main row: left toolbar + canvas area
-            Give the row enough right padding so the fixed panel doesn't overlap */}
-        <div
-          className="flex gap-4 pt-20 px-1
-                        pr-[16rem] sm:pr-[18rem] md:pr-[20rem]"
-        >
-          {/* Left panel (auto-height) */}
+        {/* Main row (reserve space for right panel) */}
+        <div className="flex gap-4 pt-20 px-1 pr-[16rem] sm:pr-[18rem] md:pr-[20rem]">
+          {/* Left tools */}
           <LeftPanel className="sticky top-28 self-start">
             {tools.map((t) => (
               <ToolButton
@@ -113,17 +118,39 @@ const CanvasBoard = () => {
                 label={t.label}
                 selected={selectedTool === t.id}
                 onClick={() => handleToolClick(t.id)}
+                colorIndicator={
+                  t.id === "pencil" || t.id === "fill"
+                    ? currentColor
+                    : undefined
+                }
               />
             ))}
           </LeftPanel>
 
-          {/* Canvas container */}
-          <div className="flex-1 flex items-start justify-center">
+          {/* Canvas */}
+          <div className="flex-1 flex items-start justify-center relative">
             <PixelGridCanvas
               width={width}
               height={height}
               selectedTool={selectedTool}
+              color={currentColor} // <-- we'll use this to draw next
+              activeLayerId={selectedLayerId} // <-- for later
             />
+
+            {/* Color Picker popover (positioned near canvas) */}
+            {showColorPicker && (
+              <div className="absolute left-0 top-0 mt-2">
+                <ColorPicker
+                  initial={currentColor}
+                  onChange={setCurrentColor}
+                  onApply={(hex) => {
+                    setCurrentColor(hex);
+                    setShowColorPicker(false);
+                  }}
+                  onClose={() => setShowColorPicker(false)}
+                />
+              </div>
+            )}
           </div>
         </div>
       </div>

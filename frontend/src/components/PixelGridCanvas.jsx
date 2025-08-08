@@ -1,35 +1,75 @@
-import React, { useRef, useState, useEffect } from "react";
+import React, { useRef, useState, useEffect, useMemo } from "react";
 
-const PixelGridCanvas = ({ width, height }) => {
+const PixelGridCanvas = ({ width, height, selectedTool, color }) => {
   const cellSize = 30;
-  const grid = Array.from({ length: height }, (_, row) =>
-    Array.from({ length: width }, (_, col) => ({ row, col }))
+
+  const grid = useMemo(
+    () =>
+      Array.from({ length: height }, (_, row) =>
+        Array.from({ length: width }, (_, col) => ({ row, col }))
+      ),
+    [width, height]
   );
 
   const containerRef = useRef(null);
   const gridRef = useRef(null);
 
+  // --- pan/zoom state ---
   const [isDragging, setIsDragging] = useState(false);
+  const [dragSource, setDragSource] = useState(null); // 'hand' | 'middle' | null
   const [lastMousePos, setLastMousePos] = useState({ x: 0, y: 0 });
   const [translate, setTranslate] = useState({ x: 0, y: 0 });
   const [scale, setScale] = useState(1);
   const [isPointerInside, setIsPointerInside] = useState(false);
 
-  // Track if pointer is over the grid
   const handlePointerEnter = () => setIsPointerInside(true);
   const handlePointerLeave = () => setIsPointerInside(false);
 
-  // Drag start
+  // --- pixel color buffer ---
+  const [pixels, setPixels] = useState(() =>
+    Array.from({ length: height }, () =>
+      Array.from({ length: width }, () => null)
+    )
+  );
+  useEffect(() => {
+    setPixels(
+      Array.from({ length: height }, () =>
+        Array.from({ length: width }, () => null)
+      )
+    );
+  }, [width, height]);
+
+  const paintAt = (row, col, hexOrNull) => {
+    if (row < 0 || col < 0 || row >= height || col >= width) return;
+    setPixels((prev) => {
+      const next = prev.map((r) => r.slice());
+      next[row][col] = hexOrNull; // null = clear
+      return next;
+    });
+  };
+
+  const [isDrawing, setIsDrawing] = useState(false);
+
+  // Mouse down on container (for panning)
   const handleMouseDown = (e) => {
     if (e.button === 1) {
       e.preventDefault();
       setIsDragging(true);
+      setDragSource("middle");
       setLastMousePos({ x: e.clientX, y: e.clientY });
       document.body.style.cursor = "grabbing";
+      return;
+    }
+    if (e.button === 0 && selectedTool === "hand") {
+      e.preventDefault();
+      setIsDragging(true);
+      setDragSource("hand");
+      setLastMousePos({ x: e.clientX, y: e.clientY });
+      document.body.style.cursor = "grabbing";
+      return;
     }
   };
 
-  // Drag move
   const handleMouseMove = (e) => {
     if (!isDragging) return;
     const dx = e.clientX - lastMousePos.x;
@@ -38,21 +78,20 @@ const PixelGridCanvas = ({ width, height }) => {
     setTranslate((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
   };
 
-  // Drag end
   const handleMouseUp = () => {
     setIsDragging(false);
+    setDragSource(null);
+    setIsDrawing(false); // stop drawing/erasing drags
     document.body.style.cursor = "default";
   };
 
-  // Attach wheel event with passive: false to override default scroll
+  // Wheel zoom
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-
     const handleWheel = (e) => {
-      if (!isPointerInside) return; // Let normal scroll work outside
+      if (!isPointerInside) return;
       e.preventDefault();
-
       const zoomSpeed = 0.1;
       const delta = -e.deltaY;
       setScale((prev) => {
@@ -60,19 +99,55 @@ const PixelGridCanvas = ({ width, height }) => {
         return Math.min(4, Math.max(0.5, next));
       });
     };
-
     el.addEventListener("wheel", handleWheel, { passive: false });
     return () => el.removeEventListener("wheel", handleWheel);
   }, [isPointerInside]);
 
+  // Cursor: hand shows grab/grabbing; otherwise crosshair while drawing tools are active
+  const cursorStyle =
+    selectedTool === "hand"
+      ? isDragging
+        ? "grabbing"
+        : "grab"
+      : isDragging && dragSource === "middle"
+      ? "grabbing"
+      : "crosshair";
+
+  // --- Cell handlers: pencil + eraser ---
+  const onCellMouseDown = (row, col) => (e) => {
+    if (e.button !== 0) return; // left only
+    if (selectedTool === "pencil") {
+      e.preventDefault();
+      paintAt(row, col, color || "#000000");
+      setIsDrawing(true);
+    } else if (selectedTool === "eraser") {
+      // NEW
+      e.preventDefault();
+      paintAt(row, col, null); // NEW (clear pixel)
+      setIsDrawing(true); // NEW (drag to keep erasing)
+    }
+    // (fill/picker to be added later)
+  };
+
+  const onCellMouseEnter = (row, col) => (e) => {
+    if (!isDrawing) return;
+    if (selectedTool === "pencil") {
+      paintAt(row, col, color || "#000000");
+    } else if (selectedTool === "eraser") {
+      // NEW
+      paintAt(row, col, null); // NEW
+    }
+  };
+
   return (
     <div
       ref={containerRef}
-      className="w-full h-full overflow-hidden flex items-center justify-center"
+      className="w-full h-full overflow-hidden flex items-center justify-center select-none"
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
+      style={{ cursor: cursorStyle }}
     >
       <div
         ref={gridRef}
@@ -86,31 +161,25 @@ const PixelGridCanvas = ({ width, height }) => {
           boxShadow: "0 0 30px rgba(0,0,0,0.2)",
           borderRadius: "12px",
           overflow: "hidden",
-          cursor: isDragging ? "grabbing" : "default",
         }}
       >
         {grid.map((row, rowIndex) => (
           <div key={rowIndex} className="flex">
-            {row.map((cell, colIndex) => {
-              const isLight = (rowIndex + colIndex) % 2 === 0;
+            {row.map(({ row, col }) => {
+              const isLight = (row + col) % 2 === 0;
               const baseColor = isLight ? "#e6f0ff" : "#dfe9f5";
-              const hoverColor = isLight ? "#d0e4ff" : "#ccdceb";
-
+              const pixel = pixels[row][col];
               return (
                 <div
-                  key={`${rowIndex}-${colIndex}`}
-                  className="transition-all duration-100 ease-in-out"
+                  key={`${row}-${col}`}
+                  className="transition-colors duration-75 ease-in-out"
                   style={{
                     width: `${cellSize}px`,
                     height: `${cellSize}px`,
-                    backgroundColor: baseColor,
+                    backgroundColor: pixel ?? baseColor,
                   }}
-                  onMouseEnter={(e) =>
-                    (e.target.style.backgroundColor = hoverColor)
-                  }
-                  onMouseLeave={(e) =>
-                    (e.target.style.backgroundColor = baseColor)
-                  }
+                  onMouseDown={onCellMouseDown(row, col)}
+                  onMouseEnter={onCellMouseEnter(row, col)}
                 />
               );
             })}

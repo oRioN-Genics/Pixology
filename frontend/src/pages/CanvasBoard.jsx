@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import PixelGridCanvas from "../components/PixelGridCanvas";
 import NavBar from "../components/NavBar";
 import LeftPanel from "../components/LeftPanel";
@@ -20,6 +20,10 @@ const CanvasBoard = () => {
   // toast
   const [toastMsg, setToastMsg] = useState("");
 
+  // undo/redo ticks (signals to canvas)
+  const [undoTick, setUndoTick] = useState(0);
+  const [redoTick, setRedoTick] = useState(0);
+
   const tools = useMemo(
     () => [
       { id: "hand", label: "Move", icon: assets.handIcon },
@@ -34,10 +38,15 @@ const CanvasBoard = () => {
   );
 
   const handleToolClick = (id) => {
-    if (id === "undo" || id === "redo") {
-      console.log(id);
+    if (id === "undo") {
+      setUndoTick((n) => n + 1);
       return;
     }
+    if (id === "redo") {
+      setRedoTick((n) => n + 1);
+      return;
+    }
+
     setSelectedTool(id);
     if (id === "pencil" || id === "fill" || id === "picker") {
       setShowColorPicker(true);
@@ -45,6 +54,33 @@ const CanvasBoard = () => {
       setShowColorPicker(false);
     }
   };
+
+  // Keyboard shortcuts: Ctrl/Cmd+Z (undo), Ctrl+Y or Ctrl/Cmd+Shift+Z (redo)
+  useEffect(() => {
+    const handler = (e) => {
+      const key = e.key.toLowerCase();
+      const ctrlOrCmd = e.ctrlKey || e.metaKey;
+
+      if (!ctrlOrCmd) return;
+
+      // Undo: Ctrl/Cmd + Z (without Shift)
+      if (key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        setUndoTick((n) => n + 1);
+        return;
+      }
+
+      // Redo: Ctrl+Y OR Ctrl/Cmd+Shift+Z
+      if (key === "y" || (key === "z" && e.shiftKey)) {
+        e.preventDefault();
+        setRedoTick((n) => n + 1);
+        return;
+      }
+    };
+
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   // Layers
   const [layers, setLayers] = useState([
@@ -142,6 +178,8 @@ const CanvasBoard = () => {
                 if (hex) setCurrentColor(hex);
                 setShowColorPicker(true); // keep picker open to tweak
               }}
+              undoTick={undoTick}
+              redoTick={redoTick}
             />
 
             {/* Color Picker popover */}

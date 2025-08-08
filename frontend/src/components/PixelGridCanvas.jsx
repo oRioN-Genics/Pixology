@@ -1,5 +1,7 @@
 import React, { useRef, useState, useEffect, useMemo } from "react";
 
+const MAX_HISTORY = 100; // cap actions in memory
+
 const PixelGridCanvas = ({
   width,
   height,
@@ -8,11 +10,12 @@ const PixelGridCanvas = ({
   activeLayerId,
   layers = [],
   onRequireLayer,
-  onPickColor, // ⬅️ eyedropper callback
+  onPickColor,
+  undoTick,
+  redoTick,
 }) => {
   const cellSize = 30;
 
-  // ---- Fill options (tweak later via UI if you want) ----
   const FILL = { tolerance: 0, contiguous: true, sampleAllLayers: false };
 
   // ---- Color helpers ----
@@ -98,22 +101,6 @@ const PixelGridCanvas = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layers, width, height]);
 
-  // mutate one pixel in a specific layer
-  const paintAt = (layerId, row, col, hexOrNull) => {
-    if (row < 0 || col < 0 || row >= height || col >= width) return;
-    setBuffers((prev) => {
-      const next = new Map(prev);
-      const layerBuf = next.get(layerId);
-      if (!layerBuf) return prev;
-      const rowCopy = layerBuf[row].slice();
-      rowCopy[col] = hexOrNull;
-      const newLayer = layerBuf.slice();
-      newLayer[row] = rowCopy;
-      next.set(layerId, newLayer);
-      return next;
-    });
-  };
-
   // composite visible layers: first non-null from topmost (layers[0] is top)
   const compositeAt = (row, col) => {
     for (const ly of layers) {
@@ -125,8 +112,109 @@ const PixelGridCanvas = ({
     return null;
   };
 
-  // Flood fill (contiguous; tolerance-ready; can sample all layers)
-  const floodFill = (
+  // -------- History (diff-based) --------
+  // A "diff" = { layerId, row, col, prev, next }
+  const undoStack = useRef([]); // array of diffs arrays
+  const redoStack = useRef([]); // array of diffs arrays
+  const currentStroke = useRef(null); // Map key->diff for active drag
+
+  const recordPixelChangeInStroke = (layerId, row, col, prev, next) => {
+    if (!currentStroke.current) return;
+    const key = `${layerId}:${row}:${col}`;
+    const existing = currentStroke.current.get(key);
+    if (existing) {
+      existing.next = next; // preserve original prev, update next
+    } else {
+      currentStroke.current.set(key, { layerId, row, col, prev, next });
+    }
+  };
+
+  const pushHistory = (diffs) => {
+    if (!diffs || diffs.length === 0) return;
+    undoStack.current.push(diffs);
+    if (undoStack.current.length > MAX_HISTORY) undoStack.current.shift();
+    // new action invalidates redo stack
+    redoStack.current = [];
+  };
+
+  const applyDiffs = (diffs, direction = "apply") => {
+    setBuffers((prev) => {
+      const next = new Map(prev);
+      // group by layer, pre-copy affected rows
+      const rowsToCopy = new Map(); // layerId -> Set(row)
+
+      for (const d of diffs) {
+        if (!rowsToCopy.has(d.layerId)) rowsToCopy.set(d.layerId, new Set());
+        rowsToCopy.get(d.layerId).add(d.row);
+      }
+
+      for (const [layerId, rows] of rowsToCopy.entries()) {
+        const buf = next.get(layerId);
+        if (!buf) continue;
+        const newLayer = buf.slice();
+        for (const r of rows) newLayer[r] = buf[r].slice();
+        next.set(layerId, newLayer);
+      }
+
+      for (const d of diffs) {
+        const layer = next.get(d.layerId);
+        if (!layer) continue;
+        const use = direction === "undo" ? d.prev : d.next;
+        layer[d.row][d.col] = use;
+      }
+
+      return next;
+    });
+  };
+
+  // external undo/redo triggers
+  const lastUndoTick = useRef(undoTick);
+  const lastRedoTick = useRef(redoTick);
+
+  useEffect(() => {
+    if (undoTick === lastUndoTick.current) return;
+    lastUndoTick.current = undoTick;
+
+    const diffs = undoStack.current.pop();
+    if (!diffs) return;
+    applyDiffs(diffs, "undo");
+    redoStack.current.push(diffs);
+  }, [undoTick]);
+
+  useEffect(() => {
+    if (redoTick === lastRedoTick.current) return;
+    lastRedoTick.current = redoTick;
+
+    const diffs = redoStack.current.pop();
+    if (!diffs) return;
+    applyDiffs(diffs, "redo");
+    undoStack.current.push(diffs);
+  }, [redoTick]);
+
+  // write + record into current stroke
+  const setPixelWithHistory = (layerId, row, col, next) => {
+    const prev = buffers.get(layerId)?.[row]?.[col] ?? null;
+    if (prev === next) return;
+
+    // apply immediate
+    setBuffers((prevBuf) => {
+      const nextBuf = new Map(prevBuf);
+      const layer = nextBuf.get(layerId);
+      if (!layer) return prevBuf;
+      const rowCopy = layer[row].slice();
+      rowCopy[col] = next;
+      const newLayer = layer.slice();
+      newLayer[row] = rowCopy;
+      nextBuf.set(layerId, newLayer);
+      return nextBuf;
+    });
+
+    // record
+    recordPixelChangeInStroke(layerId, row, col, prev, next);
+  };
+
+  // Flood fill returning diffs (for history), then apply + push
+  const floodFillApply = (
     layerId,
     startRow,
     startCol,
@@ -139,8 +227,6 @@ const PixelGridCanvas = ({
     const getAt = (r, c) =>
       sampleAllLayers ? compositeAt(r, c) : lyBuf?.[r]?.[c] ?? null;
     const targetHex = getAt(startRow, startCol);
-
-    // If target ~ new color, do nothing
     if (matchesColor(targetHex, newHex, tolerance)) return;
 
     const visited = new Uint8Array(width * height);
@@ -152,7 +238,7 @@ const PixelGridCanvas = ({
     const q = [[startRow, startCol]];
     mark(startRow, startCol);
 
-    const edits = [];
+    const diffs = [];
     const tryPush = (r, c) => {
       if (r < 0 || c < 0 || r >= height || c >= width) return;
       if (seen(r, c)) return;
@@ -165,7 +251,9 @@ const PixelGridCanvas = ({
 
     while (q.length) {
       const [r, c] = q.pop();
-      edits.push([r, c]);
+      const prev = lyBuf[r][c] ?? null;
+      diffs.push({ layerId, row: r, col: c, prev, next: newHex });
+
       if (contiguous) {
         tryPush(r + 1, c);
         tryPush(r - 1, c);
@@ -174,15 +262,8 @@ const PixelGridCanvas = ({
       }
     }
 
-    setBuffers((prev) => {
-      const next = new Map(prev);
-      const buf = next.get(layerId);
-      if (!buf) return prev;
-      const newLayer = buf.map((row) => row.slice());
-      for (const [r, c] of edits) newLayer[r][c] = newHex;
-      next.set(layerId, newLayer);
-      return next;
-    });
+    applyDiffs(diffs, "apply");
+    pushHistory(diffs);
   };
 
   // ------ drawing guard ------
@@ -239,6 +320,13 @@ const PixelGridCanvas = ({
     setIsDragging(false);
     setDragSource(null);
     setIsDrawing(false);
+
+    // finalize stroke → push history
+    if (currentStroke.current && currentStroke.current.size > 0) {
+      pushHistory(Array.from(currentStroke.current.values()));
+      currentStroke.current = null;
+    }
+
     document.body.style.cursor = "default";
   };
 
@@ -285,7 +373,6 @@ const PixelGridCanvas = ({
       if (sampled) {
         onPickColor?.(sampled);
       } else {
-        // optional: nudge if transparent
         onRequireLayer?.("No color at this pixel (transparent).");
       }
       return;
@@ -302,35 +389,33 @@ const PixelGridCanvas = ({
 
       e.preventDefault();
 
-      if (selectedTool === "pencil") {
-        paintAt(ly.id, row, col, color || "#000000");
-        setIsDrawing(true);
-      } else if (selectedTool === "eraser") {
-        paintAt(ly.id, row, col, null);
-        setIsDrawing(true);
-      } else if (selectedTool === "fill") {
-        floodFill(
+      if (selectedTool === "fill") {
+        floodFillApply(
           ly.id,
           row,
           col,
           color || "#000000",
           FILL // { tolerance, contiguous, sampleAllLayers }
         );
+        return;
       }
+
+      // start a stroke for pencil/eraser (diffs batched)
+      currentStroke.current = new Map();
+      setIsDrawing(true);
+
+      const next = selectedTool === "pencil" ? color || "#000000" : null;
+      setPixelWithHistory(ly.id, row, col, next);
     }
   };
 
   const onCellMouseEnter = (row, col) => () => {
     if (!isDrawing) return;
-    if (selectedTool === "pencil" || selectedTool === "eraser") {
-      const ly = ensureDrawableLayer();
-      if (!ly) return;
-      if (selectedTool === "pencil") {
-        paintAt(ly.id, row, col, color || "#000000");
-      } else {
-        paintAt(ly.id, row, col, null);
-      }
-    }
+    const ly = ensureDrawableLayer();
+    if (!ly) return;
+
+    const next = selectedTool === "pencil" ? color || "#000000" : null;
+    setPixelWithHistory(ly.id, row, col, next);
   };
 
   return (

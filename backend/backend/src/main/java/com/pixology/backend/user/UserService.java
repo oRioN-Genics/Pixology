@@ -6,6 +6,8 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.bcrypt.BCrypt;
 import org.springframework.stereotype.Service;
 
+import java.util.Optional;
+
 @Service
 public class UserService {
 
@@ -35,6 +37,20 @@ public class UserService {
         User saved = repo.save(new User(username, email.toLowerCase(), hash));
 
         return new UserResponse(saved.getId(), saved.getUsername(), saved.getEmail());
+    }
+
+    public Optional<User> authenticate(String email, String rawPassword) {
+        final String em = safe(email).toLowerCase();
+        final String pw = rawPassword == null ? "" : rawPassword;
+        if (em.isBlank() || pw.isBlank()) return Optional.empty();
+
+        return repo.findByEmail(em)
+                .filter(u -> BCrypt.checkpw(pw, u.getPasswordHash()));
+    }
+
+    public Optional<UserResponse> login(String email, String rawPassword) {
+        return authenticate(email, rawPassword)
+                .map(u -> new UserResponse(u.getId(), u.getUsername(), u.getEmail()));
     }
 
     private String safe(String s) { return s == null ? "" : s.trim(); }

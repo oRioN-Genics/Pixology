@@ -3,13 +3,42 @@ import BlueButton from "./BlueButton";
 import { assets } from "../assets";
 import CanvasSizeModal from "./CanvasSizeModal";
 import Toast from "./Toast";
+import { useNavigate } from "react-router-dom";
+
+const readUser = () => {
+  try {
+    const raw = localStorage.getItem("pixology:user");
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
 
 const HeroSection = () => {
+  const navigate = useNavigate();
   const [showModal, setShowModal] = useState(false);
   const [toastMsg, setToastMsg] = useState("");
 
+  const isAuthed = !!readUser();
+
+  const requireAuth = (action) => {
+    if (!isAuthed) {
+      setToastMsg("Please log in to continue");
+      // Navigate to login after short delay so toast is visible
+      setTimeout(() => navigate("/login"), 1000);
+      return false;
+    }
+    return true;
+  };
+
   const handleNewProjectClick = () => {
+    if (!requireAuth()) return;
     setShowModal(true);
+  };
+
+  const handleOpenProjectClick = () => {
+    if (!requireAuth()) return;
+    console.log("TODO: open existing project");
   };
 
   const handleModalSubmit = (dimensions, error) => {
@@ -18,9 +47,8 @@ const HeroSection = () => {
       setToastMsg(error);
       return;
     }
-    // ✅ Proceed with dimensions.width & dimensions.height
     console.log("Creating canvas of size:", dimensions);
-    // Route to canvas page or setup grid here
+    // navigate("/canvas", { state: { width: dimensions.width, height: dimensions.height } });
   };
 
   return (
@@ -36,7 +64,11 @@ const HeroSection = () => {
             >
               New Project +
             </BlueButton>
-            <BlueButton variant="primary" className="w-[250px]">
+            <BlueButton
+              variant="primary"
+              className="w-[250px]"
+              onClick={handleOpenProjectClick}
+            >
               Open Project
             </BlueButton>
           </div>
@@ -72,6 +104,7 @@ const HeroSection = () => {
           onSubmit={handleModalSubmit}
         />
       )}
+
       {toastMsg && <Toast message={toastMsg} onClose={() => setToastMsg("")} />}
     </div>
   );

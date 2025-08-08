@@ -1,8 +1,79 @@
-import React from "react";
+import React, { useState } from "react";
 import BlueButton from "./BlueButton";
 import { assets } from "../assets";
+import { useNavigate } from "react-router-dom";
 
 const LoginFormCard = () => {
+  const navigate = useNavigate();
+
+  const [form, setForm] = useState({ email: "", password: "" });
+  const [showPw, setShowPw] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [successMsg, setSuccessMsg] = useState("");
+
+  const onChange = (e) => {
+    const { name, value } = e.target;
+    setForm((f) => ({ ...f, [name]: value }));
+    setErrorMsg("");
+    setSuccessMsg("");
+  };
+
+  const validate = () => {
+    if (!form.email.trim()) return "Email is required";
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email))
+      return "Email is invalid";
+    if (!form.password || form.password.length < 6)
+      return "Password must be at least 6 characters";
+    return null;
+  };
+
+  const onSubmit = async (e) => {
+    e.preventDefault();
+    setErrorMsg("");
+    setSuccessMsg("");
+
+    const v = validate();
+    if (v) {
+      setErrorMsg(v);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // thanks to your Vite proxy, this hits http://localhost:8080/api/users/login in dev
+      const res = await fetch("/api/users/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+
+      if (res.ok) {
+        const data = await res.json(); // { id, username, email }
+        // Save a simple auth marker (swap to JWT later if you want)
+        localStorage.setItem("pixology:user", JSON.stringify(data));
+        // Let NavBar update immediately
+        window.dispatchEvent(new Event("storage"));
+
+        setSuccessMsg("Welcome back! Redirecting…");
+        setTimeout(() => navigate("/"), 300);
+      } else {
+        const text = await res.text();
+        if (res.status === 401) {
+          setErrorMsg(text || "Invalid credentials");
+        } else if (res.status === 400) {
+          setErrorMsg(text || "Invalid input");
+        } else {
+          setErrorMsg(text || "Something went wrong. Please try again.");
+        }
+      }
+    } catch (_) {
+      setErrorMsg("Network error. Is the backend running on :8080?");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="relative w-[90%] max-w-[1200px] mx-auto">
       {/* Background Layer (Left Transparent Box) */}
@@ -13,14 +84,19 @@ const LoginFormCard = () => {
             <h2 className="text-5xl font-bold text-black mb-6 text-center">
               Welcome Back!
             </h2>
-            <form className="flex flex-col gap-4">
+
+            <form className="flex flex-col gap-4" onSubmit={onSubmit}>
               {/* Email */}
               <div>
                 <label className="text-sm text-black">Email:</label>
                 <input
+                  name="email"
                   type="email"
                   placeholder="Enter your email"
+                  value={form.email}
+                  onChange={onChange}
                   className="w-full px-4 py-2 rounded-md mt-1 text-black bg-white"
+                  autoComplete="email"
                 />
               </div>
 
@@ -29,20 +105,40 @@ const LoginFormCard = () => {
                 <label className="text-sm text-black">Password:</label>
                 <div className="relative">
                   <input
-                    type="password"
+                    name="password"
+                    type={showPw ? "text" : "password"}
                     placeholder="Enter your password"
+                    value={form.password}
+                    onChange={onChange}
                     className="w-full px-4 py-2 rounded-md mt-1 text-black pr-10 bg-white"
+                    autoComplete="current-password"
                   />
-                  {/* Eye Icon */}
-                  {/* <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-black cursor-pointer">
-                    // 👁️
-                  </span> */}
+                  <button
+                    type="button"
+                    onClick={() => setShowPw((s) => !s)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-black/70 hover:text-black"
+                    aria-label={showPw ? "Hide password" : "Show password"}
+                  >
+                    {showPw ? "🙈" : "👁️"}
+                  </button>
                 </div>
               </div>
 
+              {/* Error / Success */}
+              {errorMsg && (
+                <div className="text-sm text-red-600 -mt-1">{errorMsg}</div>
+              )}
+              {successMsg && (
+                <div className="text-sm text-green-700 -mt-1">{successMsg}</div>
+              )}
+
               {/* Log in Button */}
-              <BlueButton variant="primary" className="w-full mt-2">
-                Log in
+              <BlueButton
+                variant="primary"
+                className="w-full mt-2 disabled:opacity-60"
+                disabled={loading}
+              >
+                {loading ? "Logging in…" : "Log in"}
               </BlueButton>
             </form>
 
@@ -50,7 +146,7 @@ const LoginFormCard = () => {
             <p className="mt-4 text-sm text-center text-black">
               Don’t have an account?{" "}
               <a
-                href="#"
+                href="/signup"
                 className="text-[#4D9FDC] font-semibold hover:underline"
               >
                 Sign up

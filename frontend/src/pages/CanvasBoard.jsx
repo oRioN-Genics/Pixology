@@ -244,7 +244,7 @@ const CanvasBoard = () => {
     <div className="relative min-h-screen">
       <div className="absolute inset-0 bg-gray-100" />
       <div className="relative z-10">
-        <NavBar showOnlySignUp showOnlyLogin showExportButton />
+        <NavBar showExportButton ignoreAuthForExport />
 
         {/* Right-edge Layers panel */}
         <div className="fixed right-4 top-28 z-20">

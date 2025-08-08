@@ -1,7 +1,12 @@
 import React, { useRef, useState, useEffect, useMemo } from "react";
 
-const MAX_HISTORY = 100; // cap actions in memory
-
+/**
+ * PixelGridCanvas
+ * - Maintains per-layer pixel buffers locally.
+ * - Builds pixel "diffs" for pencil/eraser strokes and fill operations.
+ * - Applies those diffs immediately for responsive UI, then calls onPushHistory({type:'pixels', diffs}).
+ * - Exposes an API to parent (apply/undo pixel diffs) via onRegisterPixelAPI.
+ */
 const PixelGridCanvas = ({
   width,
   height,
@@ -10,12 +15,13 @@ const PixelGridCanvas = ({
   activeLayerId,
   layers = [],
   onRequireLayer,
-  onPickColor,
-  undoTick,
-  redoTick,
+  onPickColor, // eyedropper callback
+  onPushHistory, // parent history sink: ({type:'pixels', diffs})
+  onRegisterPixelAPI, // parent gets { applyPixelDiffs, undoPixelDiffs }
 }) => {
   const cellSize = 30;
 
+  // ---- Fill options (can be surfaced later) ----
   const FILL = { tolerance: 0, contiguous: true, sampleAllLayers: false };
 
   // ---- Color helpers ----
@@ -41,7 +47,6 @@ const PixelGridCanvas = ({
     return dr * dr + dg * dg + db * db;
   };
   const matchesColor = (targetHex, candidateHex, tolerance) => {
-    // Transparent: equal only if both null when tolerance=0
     if (targetHex === null || candidateHex === null) {
       return tolerance === 0 ? targetHex === candidateHex : false;
     }
@@ -85,13 +90,16 @@ const PixelGridCanvas = ({
       Array.from({ length: width }, () => null)
     );
 
+  // Keep buffers in sync with layers and size
   useEffect(() => {
     setBuffers((prev) => {
       const next = new Map(prev);
+
       // create buffers for new layers
       layers.forEach((ly) => {
         if (!next.has(ly.id)) next.set(ly.id, makeBlank());
       });
+
       // drop buffers for removed layers
       for (const id of Array.from(next.keys())) {
         if (!layers.some((ly) => ly.id === id)) next.delete(id);
@@ -112,161 +120,67 @@ const PixelGridCanvas = ({
     return null;
   };
 
-  // -------- History (diff-based) --------
-  // A "diff" = { layerId, row, col, prev, next }
-  const undoStack = useRef([]); // array of diffs arrays
-  const redoStack = useRef([]); // array of diffs arrays
-  const currentStroke = useRef(null); // Map key->diff for active drag
-
-  const recordPixelChangeInStroke = (layerId, row, col, prev, next) => {
-    if (!currentStroke.current) return;
-    const key = `${layerId}:${row}:${col}`;
-    const existing = currentStroke.current.get(key);
-    if (existing) {
-      existing.next = next; // preserve original prev, update next
-    } else {
-      currentStroke.current.set(key, { layerId, row, col, prev, next });
-    }
-  };
-
-  const pushHistory = (diffs) => {
-    if (!diffs || diffs.length === 0) return;
-    undoStack.current.push(diffs);
-    if (undoStack.current.length > MAX_HISTORY) undoStack.current.shift();
-    // new action invalidates redo stack
-    redoStack.current = [];
-  };
-
-  const applyDiffs = (diffs, direction = "apply") => {
+  // --------- Diff helpers exposed to parent ----------
+  const applyPixelDiffs = (diffs) => {
+    // Apply "next" values
     setBuffers((prev) => {
       const next = new Map(prev);
-      // group by layer, pre-copy affected rows
-      const rowsToCopy = new Map(); // layerId -> Set(row)
+      const perLayerRows = new Map(); // layerId -> Set(row)
 
       for (const d of diffs) {
-        if (!rowsToCopy.has(d.layerId)) rowsToCopy.set(d.layerId, new Set());
-        rowsToCopy.get(d.layerId).add(d.row);
+        if (!perLayerRows.has(d.layerId))
+          perLayerRows.set(d.layerId, new Set());
+        perLayerRows.get(d.layerId).add(d.row);
       }
-
-      for (const [layerId, rows] of rowsToCopy.entries()) {
+      for (const [layerId, rows] of perLayerRows.entries()) {
         const buf = next.get(layerId);
         if (!buf) continue;
         const newLayer = buf.slice();
         for (const r of rows) newLayer[r] = buf[r].slice();
         next.set(layerId, newLayer);
       }
-
       for (const d of diffs) {
         const layer = next.get(d.layerId);
         if (!layer) continue;
-        const use = direction === "undo" ? d.prev : d.next;
-        layer[d.row][d.col] = use;
+        layer[d.row][d.col] = d.next;
       }
-
       return next;
     });
   };
 
-  // external undo/redo triggers
-  const lastUndoTick = useRef(undoTick);
-  const lastRedoTick = useRef(redoTick);
-
-  useEffect(() => {
-    if (undoTick === lastUndoTick.current) return;
-    lastUndoTick.current = undoTick;
-
-    const diffs = undoStack.current.pop();
-    if (!diffs) return;
-    applyDiffs(diffs, "undo");
-    redoStack.current.push(diffs);
-  }, [undoTick]);
-
-  useEffect(() => {
-    if (redoTick === lastRedoTick.current) return;
-    lastRedoTick.current = redoTick;
-
-    const diffs = redoStack.current.pop();
-    if (!diffs) return;
-    applyDiffs(diffs, "redo");
-    undoStack.current.push(diffs);
-  }, [redoTick]);
-
-  // write + record into current stroke
-  const setPixelWithHistory = (layerId, row, col, next) => {
-    const prev = buffers.get(layerId)?.[row]?.[col] ?? null;
-    if (prev === next) return;
-
-    // apply immediate
-    setBuffers((prevBuf) => {
-      const nextBuf = new Map(prevBuf);
-      const layer = nextBuf.get(layerId);
-      if (!layer) return prevBuf;
-      const rowCopy = layer[row].slice();
-      rowCopy[col] = next;
-      const newLayer = layer.slice();
-      newLayer[row] = rowCopy;
-      nextBuf.set(layerId, newLayer);
-      return nextBuf;
+  const undoPixelDiffs = (diffs) => {
+    // Apply "prev" values
+    setBuffers((prev) => {
+      const next = new Map(prev);
+      const perLayerRows = new Map();
+      for (const d of diffs) {
+        if (!perLayerRows.has(d.layerId))
+          perLayerRows.set(d.layerId, new Set());
+        perLayerRows.get(d.layerId).add(d.row);
+      }
+      for (const [layerId, rows] of perLayerRows.entries()) {
+        const buf = next.get(layerId);
+        if (!buf) continue;
+        const newLayer = buf.slice();
+        for (const r of rows) newLayer[r] = buf[r].slice();
+        next.set(layerId, newLayer);
+      }
+      for (const d of diffs) {
+        const layer = next.get(d.layerId);
+        if (!layer) continue;
+        layer[d.row][d.col] = d.prev;
+      }
+      return next;
     });
-
-    // record
-    recordPixelChangeInStroke(layerId, row, col, prev, next);
   };
 
-  // Flood fill returning diffs (for history), then apply + push
-  const floodFillApply = (
-    layerId,
-    startRow,
-    startCol,
-    newHex,
-    { tolerance, contiguous, sampleAllLayers }
-  ) => {
-    const lyBuf = buffers.get(layerId);
-    if (!lyBuf) return;
+  // Register the API with parent
+  useEffect(() => {
+    onRegisterPixelAPI?.({ applyPixelDiffs, undoPixelDiffs });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onRegisterPixelAPI, buffers, layers, width, height]);
 
-    const getAt = (r, c) =>
-      sampleAllLayers ? compositeAt(r, c) : lyBuf?.[r]?.[c] ?? null;
-    const targetHex = getAt(startRow, startCol);
-    if (matchesColor(targetHex, newHex, tolerance)) return;
-
-    const visited = new Uint8Array(width * height);
-    const mark = (r, c) => {
-      visited[r * width + c] = 1;
-    };
-    const seen = (r, c) => visited[r * width + c] === 1;
-
-    const q = [[startRow, startCol]];
-    mark(startRow, startCol);
-
-    const diffs = [];
-    const tryPush = (r, c) => {
-      if (r < 0 || c < 0 || r >= height || c >= width) return;
-      if (seen(r, c)) return;
-      const cand = getAt(r, c);
-      if (matchesColor(targetHex, cand, tolerance)) {
-        mark(r, c);
-        q.push([r, c]);
-      }
-    };
-
-    while (q.length) {
-      const [r, c] = q.pop();
-      const prev = lyBuf[r][c] ?? null;
-      diffs.push({ layerId, row: r, col: c, prev, next: newHex });
-
-      if (contiguous) {
-        tryPush(r + 1, c);
-        tryPush(r - 1, c);
-        tryPush(r, c + 1);
-        tryPush(r, c - 1);
-      }
-    }
-
-    applyDiffs(diffs, "apply");
-    pushHistory(diffs);
-  };
-
-  // ------ drawing guard ------
+  // ------ layer guard ------
   const ensureDrawableLayer = () => {
     const ly = layers.find((l) => l.id === activeLayerId);
     if (!activeLayerId || !ly) {
@@ -286,6 +200,7 @@ const PixelGridCanvas = ({
 
   // ------ interactions ------
   const [isDrawing, setIsDrawing] = useState(false);
+  const currentStroke = useRef(null); // Map key -> diff
 
   const handleMouseDown = (e) => {
     // middle mouse panning
@@ -321,9 +236,10 @@ const PixelGridCanvas = ({
     setDragSource(null);
     setIsDrawing(false);
 
-    // finalize stroke → push history
+    // finalize stroke: push diffs to parent history
     if (currentStroke.current && currentStroke.current.size > 0) {
-      pushHistory(Array.from(currentStroke.current.values()));
+      const diffs = Array.from(currentStroke.current.values());
+      onPushHistory?.({ type: "pixels", diffs });
       currentStroke.current = null;
     }
 
@@ -362,7 +278,90 @@ const PixelGridCanvas = ({
       ? "crosshair"
       : "crosshair";
 
-  // cell handlers (pencil / eraser / fill / picker)
+  // ---- diff writers ----
+  const setPixelImmediateWithDiff = (layerId, row, col, next) => {
+    const prev = buffers.get(layerId)?.[row]?.[col] ?? null;
+    if (prev === next) return;
+
+    // apply immediately
+    setBuffers((prevBuf) => {
+      const nextBuf = new Map(prevBuf);
+      const layer = nextBuf.get(layerId);
+      if (!layer) return prevBuf;
+      const rowCopy = layer[row].slice();
+      rowCopy[col] = next;
+      const newLayer = layer.slice();
+      newLayer[row] = rowCopy;
+      nextBuf.set(layerId, newLayer);
+      return nextBuf;
+    });
+
+    // record in stroke
+    if (currentStroke.current) {
+      const key = `${layerId}:${row}:${col}`;
+      const existing = currentStroke.current.get(key);
+      if (existing) {
+        existing.next = next; // keep original prev
+      } else {
+        currentStroke.current.set(key, { layerId, row, col, prev, next });
+      }
+    }
+  };
+
+  const applyFillAndReturnDiffs = (
+    layerId,
+    startRow,
+    startCol,
+    newHex,
+    { tolerance, contiguous, sampleAllLayers }
+  ) => {
+    const lyBuf = buffers.get(layerId);
+    if (!lyBuf) return [];
+
+    const getAt = (r, c) =>
+      sampleAllLayers ? compositeAt(r, c) : lyBuf?.[r]?.[c] ?? null;
+    const targetHex = getAt(startRow, startCol);
+    if (matchesColor(targetHex, newHex, tolerance)) return [];
+
+    const visited = new Uint8Array(width * height);
+    const mark = (r, c) => {
+      visited[r * width + c] = 1;
+    };
+    const seen = (r, c) => visited[r * width + c] === 1;
+
+    const q = [[startRow, startCol]];
+    mark(startRow, startCol);
+
+    const diffs = [];
+    const tryPush = (r, c) => {
+      if (r < 0 || c < 0 || r >= height || c >= width) return;
+      if (seen(r, c)) return;
+      const cand = getAt(r, c);
+      if (matchesColor(targetHex, cand, tolerance)) {
+        mark(r, c);
+        q.push([r, c]);
+      }
+    };
+
+    while (q.length) {
+      const [r, c] = q.pop();
+      const prev = lyBuf[r][c] ?? null;
+      diffs.push({ layerId, row: r, col: c, prev, next: newHex });
+
+      if (contiguous) {
+        tryPush(r + 1, c);
+        tryPush(r - 1, c);
+        tryPush(r, c + 1);
+        tryPush(r, c - 1);
+      }
+    }
+
+    // apply immediately
+    applyPixelDiffs(diffs);
+    return diffs;
+  };
+
+  // ---- cell handlers ----
   const onCellMouseDown = (row, col) => (e) => {
     if (e.button !== 0) return;
 
@@ -390,22 +389,23 @@ const PixelGridCanvas = ({
       e.preventDefault();
 
       if (selectedTool === "fill") {
-        floodFillApply(
+        const diffs = applyFillAndReturnDiffs(
           ly.id,
           row,
           col,
           color || "#000000",
-          FILL // { tolerance, contiguous, sampleAllLayers }
+          FILL
         );
+        if (diffs.length) onPushHistory?.({ type: "pixels", diffs });
         return;
       }
 
-      // start a stroke for pencil/eraser (diffs batched)
+      // start a stroke for pencil/eraser
       currentStroke.current = new Map();
       setIsDrawing(true);
 
       const next = selectedTool === "pencil" ? color || "#000000" : null;
-      setPixelWithHistory(ly.id, row, col, next);
+      setPixelImmediateWithDiff(ly.id, row, col, next);
     }
   };
 
@@ -415,7 +415,7 @@ const PixelGridCanvas = ({
     if (!ly) return;
 
     const next = selectedTool === "pencil" ? color || "#000000" : null;
-    setPixelWithHistory(ly.id, row, col, next);
+    setPixelImmediateWithDiff(ly.id, row, col, next);
   };
 
   return (

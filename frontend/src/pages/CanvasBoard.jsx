@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import PixelGridCanvas from "../components/PixelGridCanvas";
 import NavBar from "../components/NavBar";
 import LeftPanel from "../components/LeftPanel";
@@ -8,6 +8,17 @@ import ColorPicker from "../components/ColorPicker";
 import Toast from "../components/Toast";
 import { useLocation } from "react-router-dom";
 import { assets } from "../assets";
+
+/**
+ * Unified history (in-memory):
+ *  - { type: 'pixels', diffs }
+ *  - { type: 'layers', before, after, selectedBefore, selectedAfter }
+ *
+ * Undo/Redo applies to both kinds. For 'pixels', we call the PixelGrid API
+ * registered by the child to apply or undo diffs.
+ */
+
+const MAX_HISTORY = 100;
 
 const CanvasBoard = () => {
   const location = useLocation();
@@ -20,10 +31,54 @@ const CanvasBoard = () => {
   // toast
   const [toastMsg, setToastMsg] = useState("");
 
-  // undo/redo ticks (signals to canvas)
-  const [undoTick, setUndoTick] = useState(0);
-  const [redoTick, setRedoTick] = useState(0);
+  // Layers
+  const [layers, setLayers] = useState([
+    { id: "l1", name: "Layer 1", visible: true, locked: false },
+  ]);
+  const [selectedLayerId, setSelectedLayerId] = useState("l1");
 
+  // Pixel canvas API ref (child registers these)
+  const pixelApiRef = useRef({ applyPixelDiffs: null, undoPixelDiffs: null });
+
+  // ----- Unified History -----
+  const undoStack = useRef([]);
+  const redoStack = useRef([]);
+
+  const pushHistory = (entry) => {
+    undoStack.current.push(entry);
+    if (undoStack.current.length > MAX_HISTORY) undoStack.current.shift();
+    redoStack.current = [];
+  };
+
+  const doUndo = () => {
+    const entry = undoStack.current.pop();
+    if (!entry) return;
+
+    if (entry.type === "pixels") {
+      pixelApiRef.current.undoPixelDiffs?.(entry.diffs);
+    } else if (entry.type === "layers") {
+      setLayers(entry.before);
+      setSelectedLayerId(entry.selectedBefore ?? null);
+    }
+
+    redoStack.current.push(entry);
+  };
+
+  const doRedo = () => {
+    const entry = redoStack.current.pop();
+    if (!entry) return;
+
+    if (entry.type === "pixels") {
+      pixelApiRef.current.applyPixelDiffs?.(entry.diffs);
+    } else if (entry.type === "layers") {
+      setLayers(entry.after);
+      setSelectedLayerId(entry.selectedAfter ?? null);
+    }
+
+    undoStack.current.push(entry);
+  };
+
+  // ----- Tools -----
   const tools = useMemo(
     () => [
       { id: "hand", label: "Move", icon: assets.handIcon },
@@ -39,11 +94,11 @@ const CanvasBoard = () => {
 
   const handleToolClick = (id) => {
     if (id === "undo") {
-      setUndoTick((n) => n + 1);
+      doUndo();
       return;
     }
     if (id === "redo") {
-      setRedoTick((n) => n + 1);
+      doRedo();
       return;
     }
 
@@ -60,67 +115,129 @@ const CanvasBoard = () => {
     const handler = (e) => {
       const key = e.key.toLowerCase();
       const ctrlOrCmd = e.ctrlKey || e.metaKey;
-
       if (!ctrlOrCmd) return;
 
-      // Undo: Ctrl/Cmd + Z (without Shift)
+      // Undo
       if (key === "z" && !e.shiftKey) {
         e.preventDefault();
-        setUndoTick((n) => n + 1);
+        doUndo();
         return;
       }
-
-      // Redo: Ctrl+Y OR Ctrl/Cmd+Shift+Z
+      // Redo
       if (key === "y" || (key === "z" && e.shiftKey)) {
         e.preventDefault();
-        setRedoTick((n) => n + 1);
+        doRedo();
         return;
       }
     };
-
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  // Layers
-  const [layers, setLayers] = useState([
-    { id: "l1", name: "Layer 1", visible: true, locked: false },
-  ]);
-  // Select first layer by default
-  const [selectedLayerId, setSelectedLayerId] = useState("l1");
+  // ----- Layer ops with history -----
+  const deepCloneLayers = (ls) => JSON.parse(JSON.stringify(ls));
 
   const addLayer = () => {
     const id = crypto.randomUUID ? crypto.randomUUID() : `l${Date.now()}`;
-    setLayers((ls) => [
-      { id, name: `Layer ${ls.length + 1}`, visible: true, locked: false },
-      ...ls,
-    ]);
-    setSelectedLayerId(id);
+    setLayers((prev) => {
+      const before = deepCloneLayers(prev);
+      const after = [
+        { id, name: `Layer ${prev.length + 1}`, visible: true, locked: false },
+        ...prev,
+      ];
+      pushHistory({
+        type: "layers",
+        before,
+        after: deepCloneLayers(after),
+        selectedBefore: selectedLayerId,
+        selectedAfter: id,
+      });
+      setSelectedLayerId(id);
+      return after;
+    });
   };
-  const toggleVisible = (id) =>
-    setLayers((ls) =>
-      ls.map((l) => (l.id === id ? { ...l, visible: !l.visible } : l))
-    );
-  const toggleLocked = (id) =>
-    setLayers((ls) =>
-      ls.map((l) => (l.id === id ? { ...l, locked: !l.locked } : l))
-    );
+
+  const toggleVisible = (id) => {
+    setLayers((prev) => {
+      const before = deepCloneLayers(prev);
+      const after = prev.map((l) =>
+        l.id === id ? { ...l, visible: !l.visible } : l
+      );
+      pushHistory({
+        type: "layers",
+        before,
+        after: deepCloneLayers(after),
+        selectedBefore: selectedLayerId,
+        selectedAfter: selectedLayerId,
+      });
+      return after;
+    });
+  };
+
+  const toggleLocked = (id) => {
+    setLayers((prev) => {
+      const before = deepCloneLayers(prev);
+      const after = prev.map((l) =>
+        l.id === id ? { ...l, locked: !l.locked } : l
+      );
+      pushHistory({
+        type: "layers",
+        before,
+        after: deepCloneLayers(after),
+        selectedBefore: selectedLayerId,
+        selectedAfter: selectedLayerId,
+      });
+      return after;
+    });
+  };
+
   const renameLayer = (id) => {
     const current = layers.find((l) => l.id === id);
     const name = prompt("Rename layer:", current?.name ?? "");
-    if (name !== null) {
-      setLayers((ls) =>
-        ls.map((l) => (l.id === id ? { ...l, name: name.trim() || l.name } : l))
+    if (name === null) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+
+    setLayers((prev) => {
+      const before = deepCloneLayers(prev);
+      const after = prev.map((l) =>
+        l.id === id ? { ...l, name: trimmed } : l
       );
-    }
-  };
-  const deleteLayer = (id) => {
-    setLayers((ls) => {
-      const filtered = ls.filter((l) => l.id !== id);
-      // adjust selected layer if needed
-      setSelectedLayerId((cur) => (cur === id ? filtered[0]?.id ?? null : cur));
-      return filtered;
+      pushHistory({
+        type: "layers",
+        before,
+        after: deepCloneLayers(after),
+        selectedBefore: selectedLayerId,
+        selectedAfter: selectedLayerId,
+      });
+      return after;
     });
+  };
+
+  const deleteLayer = (id) => {
+    setLayers((prev) => {
+      const before = deepCloneLayers(prev);
+      const after = prev.filter((l) => l.id !== id);
+      const nextSelected =
+        selectedLayerId === id ? after[0]?.id ?? null : selectedLayerId;
+
+      pushHistory({
+        type: "layers",
+        before,
+        after: deepCloneLayers(after),
+        selectedBefore: selectedLayerId,
+        selectedAfter: nextSelected,
+      });
+
+      setSelectedLayerId(nextSelected);
+      return after;
+    });
+  };
+
+  // Receive pixel history entries from canvas
+  const handlePushHistoryFromCanvas = (entry) => {
+    // entry = { type:'pixels', diffs }
+    pushHistory(entry);
   };
 
   return (
@@ -178,8 +295,13 @@ const CanvasBoard = () => {
                 if (hex) setCurrentColor(hex);
                 setShowColorPicker(true); // keep picker open to tweak
               }}
-              undoTick={undoTick}
-              redoTick={redoTick}
+              onPushHistory={handlePushHistoryFromCanvas}
+              onRegisterPixelAPI={(api) => {
+                pixelApiRef.current = api || {
+                  applyPixelDiffs: null,
+                  undoPixelDiffs: null,
+                };
+              }}
             />
 
             {/* Color Picker popover */}

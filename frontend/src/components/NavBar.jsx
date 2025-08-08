@@ -1,3 +1,4 @@
+// src/components/NavBar.jsx
 import React, { useEffect, useState, useCallback } from "react";
 import { assets } from "../assets";
 import BlueButton from "./BlueButton";
@@ -12,16 +13,28 @@ const readUser = () => {
   }
 };
 
+/**
+ * Props:
+ * - showOnlyFavourites
+ * - showExportButton
+ * - ignoreAuthForExport
+ * - showSaveButton            👈 NEW (only pass this on Canvas page)
+ * - onSaveClick               👈 NEW handler
+ * - showOnlySignUp / showOnlyLogin (legacy)
+ */
 const NavBar = ({
   showOnlySignUp,
   showOnlyLogin,
   showExportButton,
   ignoreAuthForExport,
+  showOnlyFavourites,
+  showSaveButton, // 👈 NEW
+  onSaveClick, // 👈 NEW
 }) => {
   const navigate = useNavigate();
   const [user, setUser] = useState(() => readUser());
-  const isAuthed = !!user; // ✅ define first
-  const canShowExport = showExportButton && (isAuthed || !!ignoreAuthForExport); // ✅ now safe
+  const isAuthed = !!user;
+  const canShowExport = showExportButton && (isAuthed || !!ignoreAuthForExport);
 
   const sync = useCallback(() => setUser(readUser()), []);
   useEffect(() => {
@@ -53,48 +66,77 @@ const NavBar = ({
 
         {/* Right: buttons */}
         <div className="flex items-center gap-4">
-          {canShowExport && (
+          {/* Library mode: ONLY one button */}
+          {showOnlyFavourites ? (
             <BlueButton
               variant="primary"
-              className="flex items-center gap-2 px-10 py-2"
-              onClick={() => console.log("TODO: export")}
+              className="px-6 py-2"
+              onClick={() => navigate("/library?tab=favourites")}
             >
-              <img src={assets.ExportIcon} alt="Export" className="w-5 h-5" />
-              Export
+              Favourites
             </BlueButton>
-          )}
-
-          {isAuthed ? (
-            <div className="flex items-center gap-3">
-              <span className="hidden sm:block text-black/80 text-lg">
-                Hi, {user.username}
-              </span>
-              <button
-                onClick={logout}
-                className="px-4 py-2 rounded-md bg-red-400 hover:bg-red-700 text-white"
-              >
-                Log out
-              </button>
-            </div>
           ) : (
             <>
-              {!showOnlyLogin && (
-                <button
-                  className="hidden md:block px-6 py-2 text-2xl text-black hover:text-[#4D9FDC] transition duration-200 ease-in-out"
-                  onClick={() => navigate("/signup")}
-                >
-                  Sign up
-                </button>
-              )}
-
-              {!showOnlySignUp && (
+              {/* SAVE (Canvas page only) */}
+              {showSaveButton && (
                 <BlueButton
                   variant="primary"
-                  className="px-15"
-                  onClick={() => navigate("/login")}
+                  className="flex items-center gap-2 px-10 py-2"
+                  onClick={onSaveClick}
                 >
-                  Log in
+                  <img src={assets.SaveIcon} alt="Save" className="w-5 h-5" />
+                  Save
                 </BlueButton>
+              )}
+
+              {/* EXPORT (optional + auth gate if you want) */}
+              {canShowExport && (
+                <BlueButton
+                  variant="primary"
+                  className="flex items-center gap-2 px-10 py-2"
+                  onClick={() => console.log("TODO: export")}
+                >
+                  <img
+                    src={assets.ExportIcon}
+                    alt="Export"
+                    className="w-5 h-5"
+                  />
+                  Export
+                </BlueButton>
+              )}
+
+              {isAuthed ? (
+                <div className="flex items-center gap-3">
+                  <span className="hidden sm:block text-black/80 text-lg">
+                    Hi, {user.username}
+                  </span>
+                  <button
+                    onClick={logout}
+                    className="px-4 py-2 rounded-md bg-red-400 hover:bg-red-700 text-white"
+                  >
+                    Log out
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {!showOnlyLogin && (
+                    <button
+                      className="hidden md:block px-6 py-2 text-2xl text-black hover:text-[#4D9FDC] transition duration-200 ease-in-out"
+                      onClick={() => navigate("/signup")}
+                    >
+                      Sign up
+                    </button>
+                  )}
+                  {!showOnlySignUp && (
+                    <BlueButton
+                      variant="primary"
+                      className="px-15"
+                      onClick={() => navigate("/login")}
+                    >
+                      Log in
+                    </BlueButton>
+                  )}
+                </>
               )}
             </>
           )}

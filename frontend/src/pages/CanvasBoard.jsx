@@ -244,7 +244,16 @@ const CanvasBoard = () => {
     <div className="relative min-h-screen">
       <div className="absolute inset-0 bg-gray-100" />
       <div className="relative z-10">
-        <NavBar showExportButton ignoreAuthForExport />
+        <NavBar
+          showExportButton
+          ignoreAuthForExport
+          showSaveButton
+          onSaveClick={() => {
+            // hook up your save logic here
+            console.log("Save clicked");
+            // e.g., call saveProject(), or dispatch an event to the canvas
+          }}
+        />
 
         {/* Right-edge Layers panel */}
         <div className="fixed right-4 top-28 z-20">

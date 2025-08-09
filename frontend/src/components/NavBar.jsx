@@ -1,7 +1,7 @@
-// src/components/NavBar.jsx
 import React, { useEffect, useState, useCallback } from "react";
 import { assets } from "../assets";
 import BlueButton from "./BlueButton";
+import ExportFormatPopover from "./ExportFormatPopover";
 import { useNavigate } from "react-router-dom";
 
 const readUser = () => {
@@ -21,9 +21,17 @@ const NavBar = ({
   showOnlyFavourites,
   showSaveButton,
   onSaveClick,
+  // NEW: show Library on canvas
+  showLibraryButton, // 👈 add this
+  // Export hooks
+  onBeforeExportClick, // () => true | string
+  onExportBlocked, // (reason: string) => void
+  onExportPick, // (fmt: 'png' | 'jpeg') => void
 }) => {
   const navigate = useNavigate();
   const [user, setUser] = useState(() => readUser());
+  const [showExportPop, setShowExportPop] = useState(false);
+
   const isAuthed = !!user;
   const canShowExport = showExportButton && (isAuthed || !!ignoreAuthForExport);
 
@@ -43,6 +51,16 @@ const NavBar = ({
     navigate("/");
   };
 
+  const handleExportClick = () => {
+    const ok = onBeforeExportClick?.();
+    if (ok === true || ok === undefined) {
+      setShowExportPop((v) => !v);
+    } else if (typeof ok === "string") {
+      onExportBlocked?.(ok);
+      setShowExportPop(false);
+    }
+  };
+
   return (
     <div className="absolute top-0 left-0 w-full z-10 shadow-md">
       <div className="container mx-auto flex justify-between items-center py-0 px-0 md:px-20 lg:px-2 bg-white/62 rounded-b-[20px]">
@@ -57,7 +75,6 @@ const NavBar = ({
 
         {/* Right: buttons */}
         <div className="flex items-center gap-4">
-          {/* Library mode: ONLY one button */}
           {showOnlyFavourites ? (
             <BlueButton
               variant="primary"
@@ -68,6 +85,22 @@ const NavBar = ({
             </BlueButton>
           ) : (
             <>
+              {/* LIBRARY (Canvas page only) */}
+              {showLibraryButton && (
+                <BlueButton
+                  variant="primary"
+                  className="flex items-center px-8 py-2 gap-2"
+                  onClick={() => navigate("/library")}
+                >
+                  <img
+                    src={assets.LibraryIcon}
+                    alt="Library"
+                    className="w-5 h-5"
+                  />
+                  Library
+                </BlueButton>
+              )}
+
               {/* SAVE (Canvas page only) */}
               {showSaveButton && (
                 <BlueButton
@@ -80,20 +113,32 @@ const NavBar = ({
                 </BlueButton>
               )}
 
-              {/* EXPORT (optional + auth gate if you want) */}
+              {/* EXPORT + Popover */}
               {canShowExport && (
-                <BlueButton
-                  variant="primary"
-                  className="flex items-center gap-2 px-10 py-2"
-                  onClick={() => console.log("TODO: export")}
-                >
-                  <img
-                    src={assets.ExportIcon}
-                    alt="Export"
-                    className="w-5 h-5"
-                  />
-                  Export
-                </BlueButton>
+                <div className="relative">
+                  <BlueButton
+                    variant="primary"
+                    className="flex items-center gap-2 px-10 py-2"
+                    onClick={handleExportClick}
+                  >
+                    <img
+                      src={assets.ExportIcon}
+                      alt="Export"
+                      className="w-5 h-5"
+                    />
+                    Export
+                  </BlueButton>
+
+                  {showExportPop && (
+                    <ExportFormatPopover
+                      onSelect={(fmt) => {
+                        onExportPick?.(fmt);
+                        setShowExportPop(false);
+                      }}
+                      onClose={() => setShowExportPop(false)}
+                    />
+                  )}
+                </div>
               )}
 
               {isAuthed ? (

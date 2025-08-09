@@ -9,12 +9,6 @@ import Toast from "../components/Toast";
 import { useLocation } from "react-router-dom";
 import { assets } from "../assets";
 
-/**
- * Unified history (in-memory):
- *  - { type: 'pixels', diffs }
- *  - { type: 'layers', before, after, selectedBefore, selectedAfter }
- */
-
 const MAX_HISTORY = 100;
 
 const CanvasBoard = () => {
@@ -23,18 +17,17 @@ const CanvasBoard = () => {
     width: initialW = 16,
     height: initialH = 16,
     projectName: initialName = "Untitled",
-    projectId: initialId = null, // when opening an existing project, pass this in location.state
+    projectId: initialId = null,
   } = location.state || {};
 
-  const [width] = useState(initialW);
-  const [height] = useState(initialH);
-  const [projectName] = useState(initialName);
+  const [width, setWidth] = useState(initialW);
+  const [height, setHeight] = useState(initialH);
+  const [projectName, setProjectName] = useState(initialName);
   const [projectId, setProjectId] = useState(initialId);
 
   const [selectedTool, setSelectedTool] = useState("pencil");
   const [currentColor, setCurrentColor] = useState("#000000");
   const [showColorPicker, setShowColorPicker] = useState(false);
-
   const [toastMsg, setToastMsg] = useState("");
 
   // Layers
@@ -43,8 +36,8 @@ const CanvasBoard = () => {
   ]);
   const [selectedLayerId, setSelectedLayerId] = useState("l1");
 
-  // Pixel canvas API ref (child registers these)
-  // { applyPixelDiffs, undoPixelDiffs, isEmpty, makeSnapshot }
+  // Pixel canvas API
+  // expected: { applyPixelDiffs, undoPixelDiffs, isEmpty, makeSnapshot, loadFromSnapshot }
   const pixelApiRef = useRef({});
 
   // ----- Unified History -----
@@ -60,28 +53,24 @@ const CanvasBoard = () => {
   const doUndo = () => {
     const entry = undoStack.current.pop();
     if (!entry) return;
-
     if (entry.type === "pixels") {
       pixelApiRef.current.undoPixelDiffs?.(entry.diffs);
     } else if (entry.type === "layers") {
       setLayers(entry.before);
       setSelectedLayerId(entry.selectedBefore ?? null);
     }
-
     redoStack.current.push(entry);
   };
 
   const doRedo = () => {
     const entry = redoStack.current.pop();
     if (!entry) return;
-
     if (entry.type === "pixels") {
       pixelApiRef.current.applyPixelDiffs?.(entry.diffs);
     } else if (entry.type === "layers") {
       setLayers(entry.after);
       setSelectedLayerId(entry.selectedAfter ?? null);
     }
-
     undoStack.current.push(entry);
   };
 
@@ -100,15 +89,8 @@ const CanvasBoard = () => {
   );
 
   const handleToolClick = (id) => {
-    if (id === "undo") {
-      doUndo();
-      return;
-    }
-    if (id === "redo") {
-      doRedo();
-      return;
-    }
-
+    if (id === "undo") return void doUndo();
+    if (id === "redo") return void doRedo();
     setSelectedTool(id);
     if (id === "pencil" || id === "fill" || id === "picker") {
       setShowColorPicker(true);
@@ -117,7 +99,7 @@ const CanvasBoard = () => {
     }
   };
 
-  // Keyboard shortcuts
+  // Shortcuts
   useEffect(() => {
     const handler = (e) => {
       const key = e.key.toLowerCase();
@@ -127,19 +109,16 @@ const CanvasBoard = () => {
       if (key === "z" && !e.shiftKey) {
         e.preventDefault();
         doUndo();
-        return;
-      }
-      if (key === "y" || (key === "z" && e.shiftKey)) {
+      } else if (key === "y" || (key === "z" && e.shiftKey)) {
         e.preventDefault();
         doRedo();
-        return;
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  // ----- Layer ops with history -----
+  // Layer ops with history
   const deepCloneLayers = (ls) => JSON.parse(JSON.stringify(ls));
 
   const addLayer = () => {
@@ -239,12 +218,10 @@ const CanvasBoard = () => {
     });
   };
 
-  // Receive pixel history entries from canvas
-  const handlePushHistoryFromCanvas = (entry) => {
-    pushHistory(entry); // entry = { type: 'pixels', diffs }
-  };
+  // From canvas: pixel history
+  const handlePushHistoryFromCanvas = (entry) => pushHistory(entry);
 
-  // ---------- SAVE (Option A: POST once, then PUT with id) ----------
+  // ---------- SAVE (POST then PUT) ----------
   const getUser = () => {
     try {
       return JSON.parse(localStorage.getItem("pixology:user") || "null");
@@ -258,28 +235,20 @@ const CanvasBoard = () => {
     width,
     height,
     selectedLayerId,
-    layers: snapshot.layers, // [{ id, name, visible, locked, pixels }]
-    previewPng: snapshot.previewPng, // data URL (optional)
-    favorite: false, // or track real value later
+    layers: snapshot.layers,
+    previewPng: snapshot.previewPng,
+    favorite: false,
   });
 
   const saveProject = async () => {
     const user = getUser();
-    if (!user) {
-      setToastMsg("Please log in to save.");
-      return;
-    }
-
+    if (!user) return setToastMsg("Please log in to save.");
     if (pixelApiRef.current.isEmpty?.()) {
-      setToastMsg("Nothing to save yet — draw something first.");
-      return;
+      return setToastMsg("Nothing to save yet — draw something first.");
     }
 
     const snapshot = pixelApiRef.current.makeSnapshot?.();
-    if (!snapshot) {
-      setToastMsg("Could not read canvas state.");
-      return;
-    }
+    if (!snapshot) return setToastMsg("Could not read canvas state.");
 
     const payload = buildPayload(snapshot);
     const method = projectId ? "PUT" : "POST";
@@ -293,20 +262,133 @@ const CanvasBoard = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-
       const text = await res.text();
-      if (!res.ok) {
-        setToastMsg(text || "Save failed");
-        return;
-      }
-      const data = JSON.parse(text); // { id, ... }
-      if (!projectId && data.id) {
-        setProjectId(data.id); // next saves become PUT
-      }
+      if (!res.ok) return setToastMsg(text || "Save failed");
+      const data = JSON.parse(text);
+      if (!projectId && data.id) setProjectId(data.id);
       setToastMsg(projectId ? "Project updated." : "Project saved.");
-    } catch (e) {
+    } catch {
       setToastMsg("Network error while saving.");
     }
+  };
+
+  // ---------- LOAD EXISTING PROJECT ----------
+  useEffect(() => {
+    const user = getUser();
+    if (!user || !projectId) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/projects/${projectId}?userId=${user.id}`);
+        if (!res.ok) {
+          const t = await res.text();
+          throw new Error(t || "Failed to load project.");
+        }
+        const p = await res.json();
+        if (cancelled) return;
+
+        setProjectName(p.name || "Untitled");
+        setWidth(p.width);
+        setHeight(p.height);
+        setSelectedLayerId(p.selectedLayerId || null);
+
+        const meta = (p.layers || []).map((l) => ({
+          id: l.id,
+          name: l.name,
+          visible: !!l.visible,
+          locked: !!l.locked,
+        }));
+        setLayers(meta);
+
+        setTimeout(() => {
+          pixelApiRef.current.loadFromSnapshot?.({
+            width: p.width,
+            height: p.height,
+            selectedLayerId: p.selectedLayerId,
+            layers: p.layers,
+            previewPng: p.previewPng,
+          });
+        }, 0);
+      } catch (e) {
+        setToastMsg(e.message || "Could not open project.");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  // ---------- EXPORT (PNG/JPEG download) ----------
+  const renderSnapshotToDataURL = (
+    snapshot,
+    format = "png", // 'png' | 'jpeg'
+    scale = 4, // upscale for sharper export
+    jpegQuality = 0.92
+  ) => {
+    if (!snapshot) return null;
+    const { width: w, height: h } = snapshot;
+    const layersArr = Array.isArray(snapshot.layers) ? snapshot.layers : [];
+
+    const cvs = document.createElement("canvas");
+    cvs.width = w * scale;
+    cvs.height = h * scale;
+    const ctx = cvs.getContext("2d");
+
+    if (format === "jpeg") {
+      ctx.fillStyle = "#ffffff"; // JPEG has no transparency
+      ctx.fillRect(0, 0, cvs.width, cvs.height);
+    }
+
+    // Draw bottom -> top (your stored order is top-first)
+    const ordered = [...layersArr].reverse();
+    for (const ly of ordered) {
+      if (ly.visible === false) continue;
+      const px = ly.pixels || [];
+      for (let r = 0; r < h; r++) {
+        const row = px[r] || [];
+        for (let c = 0; c < w; c++) {
+          const hex = row[c];
+          if (!hex) continue;
+          ctx.fillStyle = hex;
+          ctx.fillRect(c * scale, r * scale, scale, scale);
+        }
+      }
+    }
+
+    return format === "jpeg"
+      ? cvs.toDataURL("image/jpeg", jpegQuality)
+      : cvs.toDataURL("image/png");
+  };
+
+  const triggerDownload = (dataUrl, fmt) => {
+    if (!dataUrl) return setToastMsg("Failed to export image.");
+    const safeName =
+      (projectName || "pixology").replace(/[^\w.-]+/g, "_").slice(0, 60) ||
+      "pixology";
+    const ext = fmt === "jpeg" ? "jpg" : "png";
+
+    const a = document.createElement("a");
+    a.href = dataUrl;
+    a.download = `${safeName}_${width}x${height}.${ext}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
+  const handleExportPick = (fmt /* 'png' | 'jpeg' */) => {
+    if (pixelApiRef.current?.isEmpty?.()) {
+      setToastMsg("Nothing in the canvas to export.");
+      return;
+    }
+    const snapshot = pixelApiRef.current?.makeSnapshot?.();
+    if (!snapshot) {
+      setToastMsg("Could not read canvas state.");
+      return;
+    }
+    const dataUrl = renderSnapshotToDataURL(snapshot, fmt, 4, 0.92);
+    triggerDownload(dataUrl, fmt);
   };
 
   return (
@@ -314,10 +396,19 @@ const CanvasBoard = () => {
       <div className="absolute inset-0 bg-gray-100" />
       <div className="relative z-10">
         <NavBar
+          showLibraryButton
           showExportButton
           ignoreAuthForExport
           showSaveButton
           onSaveClick={saveProject}
+          onBeforeExportClick={() => {
+            if (pixelApiRef.current?.isEmpty?.()) {
+              return "Nothing in the canvas to export.";
+            }
+            return true; // open popover
+          }}
+          onExportBlocked={(reason) => setToastMsg(reason)}
+          onExportPick={handleExportPick}
         />
 
         {/* Right-edge Layers panel */}
@@ -335,7 +426,7 @@ const CanvasBoard = () => {
           />
         </div>
 
-        {/* Main row (reserve space for right panel) */}
+        {/* Main row */}
         <div className="flex gap-4 pt-20 px-1 pr-[16rem] sm:pr-[18rem] md:pr-[20rem]">
           {/* Left tools */}
           <LeftPanel className="sticky top-28 self-start">

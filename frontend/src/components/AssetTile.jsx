@@ -1,21 +1,9 @@
 import React from "react";
-import { Star, Share2 } from "lucide-react"; // optional; remove if not using lucide
+import { Star, Share2 } from "lucide-react";
 
 /**
- * AssetTile
- * A small, square preview card for an asset.
- *
- * Props:
- * - id: string
- * - name: string
- * - previewSrc: string (img url or data URL). If absent, shows a checkerboard + placeholder.
- * - sizeLabel?: string (e.g., "32×32")
- * - selected?: boolean
- * - isFavorite?: boolean
- * - isShared?: boolean
- * - onClick?: (id) => void
- * - onDoubleClick?: (id) => void
- * - onContextMenu?: (id, event) => void
+ * AssetTile – bigger & prettier
+ * Props unchanged.
  */
 const AssetTile = ({
   id,
@@ -32,73 +20,84 @@ const AssetTile = ({
   return (
     <button
       type="button"
+      title={name}
       onClick={() => onClick?.(id)}
       onDoubleClick={() => onDoubleClick?.(id)}
       onContextMenu={(e) => {
         e.preventDefault();
         onContextMenu?.(id, e);
       }}
-      title={name}
-      className={["group w-[140px] select-none", "focus:outline-none"].join(
-        " "
-      )}
+      className={[
+        "group w-[200px] select-none text-left focus:outline-none",
+        "transition-transform duration-200",
+        selected ? "translate-y-0" : "hover:-translate-y-[2px]",
+      ].join(" ")}
     >
-      {/* Preview box */}
+      {/* Card / preview */}
       <div
         className={[
-          "relative aspect-square rounded-lg border shadow-sm",
-          "bg-[length:16px_16px] bg-[linear-gradient(45deg,#e6e9ef_25%,transparent_25%),linear-gradient(-45deg,#e6e9ef_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#e6e9ef_75%),linear-gradient(-45deg,transparent_75%,#e6e9ef_75%)]",
-          "bg-[position:0_0,0_8px,8px_-8px,-8px_0]",
-          selected ? "border-sky-500 ring-2 ring-sky-300" : "border-gray-200",
+          "relative aspect-square rounded-2xl border",
+          "shadow-sm hover:shadow-lg",
+          selected
+            ? "border-sky-400 ring-2 ring-sky-300/60"
+            : "border-slate-200",
+          // subtle checkerboard for transparency
+          "bg-[length:18px_18px]",
+          "bg-[linear-gradient(45deg,#e9edf3_25%,transparent_25%),linear-gradient(-45deg,#e9edf3_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#e9edf3_75%),linear-gradient(-45deg,transparent_75%,#e9edf3_75%)]",
+          "bg-[position:0_0,0_9px,9px_-9px,-9px_0]",
           "overflow-hidden",
           "transition-all",
-          "hover:shadow-md",
         ].join(" ")}
       >
-        {/* Image */}
+        {/* soft radial glow on hover */}
+        <div
+          className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+          style={{
+            background:
+              "radial-gradient(60% 60% at 50% 40%, rgba(77,159,220,0.10), transparent 60%)",
+          }}
+        />
+        {/* preview image */}
         {previewSrc ? (
           <img
             src={previewSrc}
             alt={name}
-            className="absolute inset-0 w-full h-full object-contain p-2"
             draggable={false}
+            className="absolute inset-0 w-full h-full object-contain p-3"
           />
         ) : (
-          <div className="absolute inset-0 grid place-items-center text-gray-400 text-sm">
+          <div className="absolute inset-0 grid place-items-center text-slate-400 text-sm">
             No preview
           </div>
         )}
 
-        {/* Favorite star */}
+        {/* badges */}
         {isFavorite && (
-          <div className="absolute left-1 top-1 rounded-full bg-white/90 p-1 shadow">
-            {/* swap for your asset star if you prefer */}
+          <div className="absolute left-2 top-2 rounded-full bg-white/90 backdrop-blur px-1.5 py-1 shadow-sm">
             <Star size={14} className="fill-yellow-400 stroke-yellow-500" />
           </div>
         )}
-
-        {/* Shared badge */}
         {isShared && (
-          <div className="absolute right-1 top-1 rounded-full bg-white/90 p-1 shadow">
+          <div className="absolute right-2 top-2 rounded-full bg-white/90 backdrop-blur px-1.5 py-1 shadow-sm">
             <Share2 size={14} className="text-sky-600" />
           </div>
         )}
 
-        {/* Size pill */}
+        {/* size pill */}
         {sizeLabel && (
-          <div className="absolute right-1 bottom-1 text-[11px] px-1.5 py-0.5 rounded bg-black/70 text-white">
+          <div className="absolute right-2 bottom-2 text-[11px] px-2 py-0.5 rounded-full bg-black/70 text-white shadow-sm">
             {sizeLabel}
           </div>
         )}
 
-        {/* Selection outline on hover (when not selected) */}
+        {/* hover outline when not selected */}
         {!selected && (
-          <div className="pointer-events-none absolute inset-0 rounded-lg ring-2 ring-sky-400/0 group-hover:ring-sky-400/40 transition" />
+          <div className="pointer-events-none absolute inset-0 rounded-2xl ring-2 ring-sky-400/0 group-hover:ring-sky-400/35 transition" />
         )}
       </div>
 
-      {/* Name */}
-      <div className="mt-2 w-full text-left truncate text-sm font-medium text-gray-900">
+      {/* name */}
+      <div className="mt-3 w-full truncate text-[15px] font-semibold text-slate-900 group-hover:text-slate-800">
         {name}
       </div>
     </button>

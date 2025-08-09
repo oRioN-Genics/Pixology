@@ -5,6 +5,7 @@ import Warrior_1 from "./Warrior_1.png";
 import Warrior_2 from "./Warrior_2.png";
 import ExportIcon from "./ExportIcon.png";
 import SaveIcon from "./saveIcon.png";
+import LibraryIcon from "./libraryIcon.png";
 
 // tools
 import handIcon from "./tools/handIcon.png";
@@ -23,6 +24,7 @@ export const assets = {
   Warrior_2,
   ExportIcon,
   SaveIcon,
+  LibraryIcon,
   handIcon,
   pencilIcon,
   eraserIcon,

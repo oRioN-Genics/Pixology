@@ -38,7 +38,7 @@ const HeroSection = () => {
 
   const handleOpenProjectClick = () => {
     if (!requireAuth()) return;
-    console.log("TODO: open existing project");
+    navigate("/library");
   };
 
   const handleModalSubmit = (dimensions, error) => {

@@ -6,6 +6,10 @@ import Warrior_2 from "./Warrior_2.png";
 import ExportIcon from "./ExportIcon.png";
 import SaveIcon from "./saveIcon.png";
 import LibraryIcon from "./libraryIcon.png";
+import Star from "./star.png";
+import EmptyStar from "./empty_star.png";
+import Show from "./show.png";
+import Hide from "./hide.png";
 
 // tools
 import handIcon from "./tools/handIcon.png";
@@ -25,6 +29,10 @@ export const assets = {
   ExportIcon,
   SaveIcon,
   LibraryIcon,
+  Star,
+  EmptyStar,
+  Show,
+  Hide,
   handIcon,
   pencilIcon,
   eraserIcon,

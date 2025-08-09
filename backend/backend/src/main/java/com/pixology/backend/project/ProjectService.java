@@ -92,10 +92,12 @@ public class ProjectService {
         return toDetail(repo.save(p));
     }
 
-    public List<ProjectSummaryResponse> listForUser(String userId) {
+    public List<ProjectSummaryResponse> listForUser(String userId, Boolean favorite) {
         validateUser(userId);
-        return repo.findAllByUserIdOrderByUpdatedAtDesc(userId)
-                .stream().map(this::toSummary).toList();
+        List<Project> rows = (favorite == null)
+                ? repo.findAllByUserIdOrderByUpdatedAtDesc(userId)
+                : repo.findAllByUserIdAndFavoriteOrderByUpdatedAtDesc(userId, favorite);
+        return rows.stream().map(this::toSummary).toList();
     }
 
     public Optional<ProjectDetailResponse> getByIdForUser(String id, String userId) {

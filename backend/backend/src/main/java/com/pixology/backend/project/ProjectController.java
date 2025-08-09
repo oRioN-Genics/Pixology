@@ -58,17 +58,19 @@ public class ProjectController {
         }
     }
 
-    // List for user
-    // GET /api/projects?userId=...
+    // List for user (optional favorite filter)
+// GET /api/projects?userId=...&favorite=true
     @GetMapping
-    public ResponseEntity<?> list(@RequestParam String userId) {
+    public ResponseEntity<?> list(@RequestParam String userId,
+                                  @RequestParam(required = false) Boolean favorite) {
         try {
-            List<ProjectSummaryResponse> list = service.listForUser(userId);
+            List<ProjectSummaryResponse> list = service.listForUser(userId, favorite);
             return ResponseEntity.ok(list);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
         }
     }
+
 
     // Get single
     // GET /api/projects/{id}?userId=...

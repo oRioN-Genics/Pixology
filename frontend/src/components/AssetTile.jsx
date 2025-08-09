@@ -1,9 +1,12 @@
 import React from "react";
-import { Star, Share2 } from "lucide-react";
+import { Share2 } from "lucide-react";
+import { assets } from "../assets";
 
 /**
- * AssetTile – bigger & prettier
- * Props unchanged.
+ * AssetTile – bigger & prettier with favorite toggle
+ *
+ * Extra prop:
+ * - onToggleFavorite?: (id: string, next: boolean) => void
  */
 const AssetTile = ({
   id,
@@ -16,7 +19,14 @@ const AssetTile = ({
   onClick,
   onDoubleClick,
   onContextMenu,
+  onToggleFavorite, // 👈 NEW
 }) => {
+  const handleFavClick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onToggleFavorite?.(id, !isFavorite);
+  };
+
   return (
     <button
       type="button"
@@ -41,7 +51,6 @@ const AssetTile = ({
           selected
             ? "border-sky-400 ring-2 ring-sky-300/60"
             : "border-slate-200",
-          // subtle checkerboard for transparency
           "bg-[length:18px_18px]",
           "bg-[linear-gradient(45deg,#e9edf3_25%,transparent_25%),linear-gradient(-45deg,#e9edf3_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#e9edf3_75%),linear-gradient(-45deg,transparent_75%,#e9edf3_75%)]",
           "bg-[position:0_0,0_9px,9px_-9px,-9px_0]",
@@ -49,7 +58,7 @@ const AssetTile = ({
           "transition-all",
         ].join(" ")}
       >
-        {/* soft radial glow on hover */}
+        {/* soft hover glow */}
         <div
           className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
           style={{
@@ -57,7 +66,8 @@ const AssetTile = ({
               "radial-gradient(60% 60% at 50% 40%, rgba(77,159,220,0.10), transparent 60%)",
           }}
         />
-        {/* preview image */}
+
+        {/* Preview image */}
         {previewSrc ? (
           <img
             src={previewSrc}
@@ -71,19 +81,29 @@ const AssetTile = ({
           </div>
         )}
 
-        {/* badges */}
-        {isFavorite && (
-          <div className="absolute left-2 top-2 rounded-full bg-white/90 backdrop-blur px-1.5 py-1 shadow-sm">
-            <Star size={14} className="fill-yellow-400 stroke-yellow-500" />
-          </div>
-        )}
+        {/* Favorite (top-right) */}
+        <button
+          type="button"
+          onClick={handleFavClick}
+          aria-label={isFavorite ? "Unfavorite" : "Favorite"}
+          className="absolute right-2 top-2 rounded-full bg-white/95 backdrop-blur p-1 shadow hover:scale-105 transition"
+        >
+          <img
+            src={isFavorite ? assets.Star : assets.EmptyStar}
+            alt=""
+            className="w-5 h-5"
+            draggable={false}
+          />
+        </button>
+
+        {/* Shared badge (optional) */}
         {isShared && (
-          <div className="absolute right-2 top-2 rounded-full bg-white/90 backdrop-blur px-1.5 py-1 shadow-sm">
+          <div className="absolute left-2 top-2 rounded-full bg-white/90 backdrop-blur px-1.5 py-1 shadow-sm">
             <Share2 size={14} className="text-sky-600" />
           </div>
         )}
 
-        {/* size pill */}
+        {/* Size pill */}
         {sizeLabel && (
           <div className="absolute right-2 bottom-2 text-[11px] px-2 py-0.5 rounded-full bg-black/70 text-white shadow-sm">
             {sizeLabel}

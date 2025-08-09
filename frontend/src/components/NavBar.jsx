@@ -1,8 +1,9 @@
+// src/components/NavBar.jsx
 import React, { useEffect, useState, useCallback } from "react";
 import { assets } from "../assets";
 import BlueButton from "./BlueButton";
 import ExportFormatPopover from "./ExportFormatPopover";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 
 const readUser = () => {
   try {
@@ -22,13 +23,20 @@ const NavBar = ({
   showSaveButton,
   onSaveClick,
   // NEW: show Library on canvas
-  showLibraryButton, // 👈 add this
+  showLibraryButton,
   // Export hooks
   onBeforeExportClick, // () => true | string
   onExportBlocked, // (reason: string) => void
   onExportPick, // (fmt: 'png' | 'jpeg') => void
 }) => {
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // detect if we are currently viewing favourites
+  const search = new URLSearchParams(location.search);
+  const atLibrary = location.pathname === "/library";
+  const atFavourites = atLibrary && search.get("tab") === "favourites";
+
   const [user, setUser] = useState(() => readUser());
   const [showExportPop, setShowExportPop] = useState(false);
 
@@ -76,12 +84,18 @@ const NavBar = ({
         {/* Right: buttons */}
         <div className="flex items-center gap-4">
           {showOnlyFavourites ? (
+            // SINGLE TOGGLING BUTTON
             <BlueButton
               variant="primary"
               className="px-6 py-2"
-              onClick={() => navigate("/library?tab=favourites")}
+              onClick={
+                () =>
+                  atFavourites
+                    ? navigate("/library") // go back to all
+                    : navigate("/library?tab=favourites") // go to favourites
+              }
             >
-              Favourites
+              {atFavourites ? "Library" : "Favourites"}
             </BlueButton>
           ) : (
             <>

@@ -2,12 +2,6 @@ import React from "react";
 import { Share2 } from "lucide-react";
 import { assets } from "../assets";
 
-/**
- * AssetTile – bigger & prettier with favorite toggle
- *
- * Extra prop:
- * - onToggleFavorite?: (id: string, next: boolean) => void
- */
 const AssetTile = ({
   id,
   name,
@@ -19,12 +13,19 @@ const AssetTile = ({
   onClick,
   onDoubleClick,
   onContextMenu,
-  onToggleFavorite, // 👈 NEW
+  onToggleFavorite,
+  onDelete,
 }) => {
   const handleFavClick = (e) => {
     e.preventDefault();
     e.stopPropagation();
     onToggleFavorite?.(id, !isFavorite);
+  };
+
+  const handleDeleteClick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onDelete?.(id);
   };
 
   return (
@@ -86,6 +87,7 @@ const AssetTile = ({
           type="button"
           onClick={handleFavClick}
           aria-label={isFavorite ? "Unfavorite" : "Favorite"}
+          title={isFavorite ? "Unfavorite" : "Favorite"}
           className="absolute right-2 top-2 rounded-full bg-white/95 backdrop-blur p-1 shadow hover:scale-105 transition"
         >
           <img
@@ -94,6 +96,31 @@ const AssetTile = ({
             className="w-5 h-5"
             draggable={false}
           />
+        </button>
+
+        {/* Delete (under favorite) */}
+        <button
+          type="button"
+          onClick={handleDeleteClick}
+          aria-label="Delete"
+          title="Delete"
+          className="absolute right-2 top-10 rounded-full bg-white/95 backdrop-blur p-1 shadow hover:scale-105 transition"
+        >
+          {assets.DeleteIcon ? (
+            <img
+              src={assets.DeleteIcon}
+              alt=""
+              className="w-5 h-5"
+              draggable={false}
+            />
+          ) : (
+            <img
+              src={assets.Delete}
+              alt=""
+              className="w-5 h-5"
+              draggable={false}
+            />
+          )}
         </button>
 
         {/* Shared badge (optional) */}

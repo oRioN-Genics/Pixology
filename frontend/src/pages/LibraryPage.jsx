@@ -32,6 +32,7 @@ const LibraryPage = () => {
   const tab = (params.get("tab") || "recents").toLowerCase();
   const isFavTab = tab === "favourites" || tab === "favorites";
 
+  // fetch projects
   useEffect(() => {
     if (!user) {
       setToastMsg("Please log in to view your library.");
@@ -75,8 +76,7 @@ const LibraryPage = () => {
     });
   };
 
-  // Toggle favorite (optimistic). If on favourites tab and user unfavourites,
-  // hide immediately; revert if server fails.
+  // Toggle favorite (optimistic)
   const toggleFavorite = async (id, next) => {
     if (!user) {
       setToastMsg("Please log in to change favorites.");
@@ -106,7 +106,6 @@ const LibraryPage = () => {
       return;
     }
 
-    // Generic optimistic toggle elsewhere
     setProjects((prev) =>
       prev.map((p) => (p.id === id ? { ...p, favorite: next } : p))
     );
@@ -129,6 +128,38 @@ const LibraryPage = () => {
         prev.map((p) => (p.id === id ? { ...p, favorite: !next } : p))
       );
       setToastMsg(e.message || "Could not update favorite.");
+    }
+  };
+
+  // Delete handler
+  const confirmDelete = async (id) => {
+    if (!user) {
+      setToastMsg("Please log in to delete projects.");
+      return;
+    }
+    const proj = projects.find((p) => p.id === id);
+    const label = proj?.name ? `“${proj.name}”` : "this project";
+    const ok = window.confirm(`Delete ${label}? This cannot be undone.`);
+    if (!ok) return;
+
+    // optimistic remove
+    const snapshot = projects;
+    setProjects((prev) => prev.filter((p) => p.id !== id));
+    if (selectedId === id) setSelectedId(null);
+
+    try {
+      const res = await fetch(`/api/projects/${id}?userId=${user.id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error(t || "Failed to delete project.");
+      }
+      setToastMsg("Project deleted.");
+    } catch (e) {
+      // revert on error
+      setProjects(snapshot);
+      setToastMsg(e.message || "Could not delete project.");
     }
   };
 
@@ -176,6 +207,7 @@ const LibraryPage = () => {
                 onDoubleClick={() => openProject(p)}
                 onContextMenu={(id, e) => console.log("Context menu:", id)}
                 onToggleFavorite={toggleFavorite}
+                onDelete={(id) => confirmDelete(id)}
               />
             ))}
           </div>

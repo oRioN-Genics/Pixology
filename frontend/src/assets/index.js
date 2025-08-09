@@ -10,6 +10,7 @@ import Star from "./star.png";
 import EmptyStar from "./empty_star.png";
 import Show from "./show.png";
 import Hide from "./hide.png";
+import Delete from "./delete.png";
 
 // tools
 import handIcon from "./tools/handIcon.png";
@@ -33,6 +34,7 @@ export const assets = {
   EmptyStar,
   Show,
   Hide,
+  Delete,
   handIcon,
   pencilIcon,
   eraserIcon,

@@ -230,8 +230,8 @@ const CanvasBoard = () => {
     }
   };
 
-  const buildPayload = (snapshot) => ({
-    name: projectName || "Untitled",
+  const buildPayload = (snapshot, nameOverride) => ({
+    name: (nameOverride ?? projectName) || "Untitled",
     width,
     height,
     selectedLayerId,
@@ -239,6 +239,14 @@ const CanvasBoard = () => {
     previewPng: snapshot.previewPng,
     favorite: false,
   });
+
+  // Suggests "Name (1)", "Name (2)", etc.
+  const suggestNextName = (base) => {
+    const m = String(base || "Untitled").match(/^(.*?)(?:\s\((\d+)\))?$/);
+    const stem = m && m[1] ? m[1] : base || "Untitled";
+    const n = m && m[2] ? parseInt(m[2], 10) + 1 : 1;
+    return `${stem} (${n})`;
+  };
 
   const saveProject = async () => {
     const user = getUser();
@@ -250,26 +258,66 @@ const CanvasBoard = () => {
     const snapshot = pixelApiRef.current.makeSnapshot?.();
     if (!snapshot) return setToastMsg("Could not read canvas state.");
 
-    const payload = buildPayload(snapshot);
     const method = projectId ? "PUT" : "POST";
     const url = projectId
       ? `/api/projects/${projectId}?userId=${user.id}`
       : `/api/projects?userId=${user.id}`;
 
-    try {
-      const res = await fetch(url, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const text = await res.text();
-      if (!res.ok) return setToastMsg(text || "Save failed");
-      const data = JSON.parse(text);
-      if (!projectId && data.id) setProjectId(data.id);
-      setToastMsg(projectId ? "Project updated." : "Project saved.");
-    } catch {
-      setToastMsg("Network error while saving.");
+    let currentName = projectName || "Untitled";
+    let attempts = 0;
+
+    while (attempts < 5) {
+      try {
+        const payload = buildPayload(snapshot, currentName);
+        const res = await fetch(url, {
+          method,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        const text = await res.text();
+
+        if (res.ok) {
+          const data = JSON.parse(text);
+          if (!projectId && data.id) setProjectId(data.id);
+          setProjectName(currentName);
+          setToastMsg(projectId ? "Project updated." : "Project saved.");
+          return;
+        }
+
+        // Name conflict -> prompt rename and retry
+        if (res.status === 409) {
+          const suggested = suggestNextName(currentName);
+          const next = window.prompt(
+            `A project named "${currentName}" already exists.\nPlease enter a different name:`,
+            suggested
+          );
+          if (next === null) {
+            setToastMsg("Save cancelled.");
+            return;
+          }
+          const trimmed = next.trim();
+          if (!trimmed) {
+            setToastMsg("Name cannot be empty.");
+            // loop again (will re-prompt with a suggestion)
+            attempts++;
+            continue;
+          }
+          currentName = trimmed;
+          attempts++;
+          continue;
+        }
+
+        // Other errors
+        setToastMsg(text || "Save failed.");
+        return;
+      } catch {
+        setToastMsg("Network error while saving.");
+        return;
+      }
     }
+
+    setToastMsg("Too many attempts. Please try a different name.");
   };
 
   // ---------- LOAD EXISTING PROJECT ----------
@@ -323,8 +371,8 @@ const CanvasBoard = () => {
   // ---------- EXPORT (PNG/JPEG download) ----------
   const renderSnapshotToDataURL = (
     snapshot,
-    format = "png", // 'png' | 'jpeg'
-    scale = 4, // upscale for sharper export
+    format = "png",
+    scale = 4,
     jpegQuality = 0.92
   ) => {
     if (!snapshot) return null;

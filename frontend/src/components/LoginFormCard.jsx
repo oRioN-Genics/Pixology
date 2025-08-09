@@ -41,7 +41,6 @@ const LoginFormCard = () => {
 
     setLoading(true);
     try {
-      // thanks to your Vite proxy, this hits http://localhost:8080/api/users/login in dev
       const res = await fetch("/api/users/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -50,7 +49,6 @@ const LoginFormCard = () => {
 
       if (res.ok) {
         const data = await res.json(); // { id, username, email }
-        // Save a simple auth marker (swap to JWT later if you want)
         localStorage.setItem("pixology:user", JSON.stringify(data));
         // Let NavBar update immediately
         window.dispatchEvent(new Event("storage"));

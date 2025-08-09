@@ -1,4 +1,3 @@
-// src/components/NavBar.jsx
 import React, { useEffect, useState, useCallback } from "react";
 import { assets } from "../assets";
 import BlueButton from "./BlueButton";
@@ -22,9 +21,7 @@ const NavBar = ({
   showOnlyFavourites,
   showSaveButton,
   onSaveClick,
-  // NEW: show Library on canvas
   showLibraryButton,
-  // Export hooks
   onBeforeExportClick, // () => true | string
   onExportBlocked, // (reason: string) => void
   onExportPick, // (fmt: 'png' | 'jpeg') => void

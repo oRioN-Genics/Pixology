@@ -82,7 +82,7 @@ const AssetTile = ({
           </div>
         )}
 
-        {/* Favorite (top-right) */}
+        {/* Favorite */}
         <button
           type="button"
           onClick={handleFavClick}
@@ -123,7 +123,7 @@ const AssetTile = ({
           )}
         </button>
 
-        {/* Shared badge (optional) */}
+        {/* Shared badge */}
         {isShared && (
           <div className="absolute left-2 top-2 rounded-full bg-white/90 backdrop-blur px-1.5 py-1 shadow-sm">
             <Share2 size={14} className="text-sky-600" />
@@ -144,7 +144,10 @@ const AssetTile = ({
       </div>
 
       {/* name */}
-      <div className="mt-3 w-full truncate text-[15px] font-semibold text-slate-900 group-hover:text-slate-800">
+      <div
+        className="mt-3 w-full truncate text-[15px] font-semibold text-slate-900 group-hover:text-slate-800"
+        style={{ fontFamily: "ChakraPetch" }}
+      >
         {name}
       </div>
     </button>

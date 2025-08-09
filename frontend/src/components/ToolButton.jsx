@@ -16,7 +16,7 @@ const ToolButton = ({ iconSrc, label, selected, onClick, colorIndicator }) => {
     >
       <img src={iconSrc} alt="" className="h-5 w-5 pointer-events-none" />
 
-      {/* Seamless side teardrop indicator (SVG) */}
+      {/* side teardrop indicator (SVG) */}
       {colorIndicator && (
         <span
           className="absolute right-[-6px] top-1/2 -translate-y-1/2 pointer-events-none select-none"

@@ -23,7 +23,6 @@ const LayersPanel = ({
       {/* Header */}
       <div className="flex items-center justify-between mb-2">
         <h2 className="text-sm font-semibold">Layers</h2>
-        {/* placeholder for grid icon on header right, if you need */}
         <button
           type="button"
           title="Add layer"

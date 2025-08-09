@@ -76,7 +76,7 @@ const LibraryPage = () => {
     });
   };
 
-  // Toggle favorite (optimistic)
+  // Toggle favorite
   const toggleFavorite = async (id, next) => {
     if (!user) {
       setToastMsg("Please log in to change favorites.");

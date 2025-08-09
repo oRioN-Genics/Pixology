@@ -1,14 +1,5 @@
 import React, { useRef, useState, useEffect, useMemo } from "react";
 
-/**
- * PixelGridCanvas
- * Exposes API via onRegisterPixelAPI:
- *   {
- *     applyPixelDiffs, undoPixelDiffs,
- *     isEmpty, makeSnapshot,
- *     loadFromSnapshot   // 👈 NEW: seed buffers from backend snapshot
- *   }
- */
 const PixelGridCanvas = ({
   width,
   height,
@@ -215,7 +206,7 @@ const PixelGridCanvas = ({
     previewPng: generatePreviewPng(),
   });
 
-  // 👇 NEW: allow parent to seed buffers from a backend snapshot
+  // allow parent to seed buffers from a backend snapshot
   const loadFromSnapshot = (snapshot) => {
     if (!snapshot || !Array.isArray(snapshot.layers)) return;
     // Build a new buffers Map using the snapshot pixels
@@ -238,7 +229,7 @@ const PixelGridCanvas = ({
       undoPixelDiffs,
       isEmpty: () => (!hasAnyPixel() ? true : false),
       makeSnapshot,
-      loadFromSnapshot, // 👈 expose
+      loadFromSnapshot,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onRegisterPixelAPI, buffers, layers, width, height, activeLayerId]);

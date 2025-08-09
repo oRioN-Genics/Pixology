@@ -1,14 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import BlueButton from "./BlueButton";
 
-/**
- * ExportFormatPopover
- * Appears anchored under the Export button.
- *
- * Props:
- * - onSelect(format: 'png' | 'jpeg')
- * - onClose()
- */
 const ExportFormatPopover = ({ onSelect, onClose }) => {
   const popRef = useRef(null);
 

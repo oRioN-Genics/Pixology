@@ -135,7 +135,11 @@ const SignUpFormCard = () => {
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-black/70 hover:text-black"
                     aria-label={showPw ? "Hide password" : "Show password"}
                   >
-                    {showPw ? "🙈" : "👁️"}
+                    <img
+                      className="w-4 h-5"
+                      src={showPw ? assets.Hide : assets.Show}
+                      alt={showPw ? "Hide password" : "Show password"}
+                    />
                   </button>
                 </div>
               </div>

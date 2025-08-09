@@ -1,4 +1,5 @@
 import React from "react";
+import { assets } from "../assets";
 
 const LayerItem = ({
   layer,
@@ -36,8 +37,11 @@ const LayerItem = ({
           title={layer.visible ? "Hide" : "Show"}
           className="p-1 rounded hover:bg-gray-100"
         >
-          {/* Use your own eye/eye-off icons if you have them */}
-          <span className="text-xs">{layer.visible ? "👁️" : "🚫"}</span>
+          <img
+            className="w-4 h-5"
+            src={layer.visible ? assets.Show : assets.Hide}
+            alt={layer.visible ? "Show layer" : "Hide layer"}
+          />
         </button>
 
         <button

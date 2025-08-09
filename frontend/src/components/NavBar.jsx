@@ -13,23 +13,14 @@ const readUser = () => {
   }
 };
 
-/**
- * Props:
- * - showOnlyFavourites
- * - showExportButton
- * - ignoreAuthForExport
- * - showSaveButton            👈 NEW (only pass this on Canvas page)
- * - onSaveClick               👈 NEW handler
- * - showOnlySignUp / showOnlyLogin (legacy)
- */
 const NavBar = ({
   showOnlySignUp,
   showOnlyLogin,
   showExportButton,
   ignoreAuthForExport,
   showOnlyFavourites,
-  showSaveButton, // 👈 NEW
-  onSaveClick, // 👈 NEW
+  showSaveButton,
+  onSaveClick,
 }) => {
   const navigate = useNavigate();
   const [user, setUser] = useState(() => readUser());

@@ -3,9 +3,9 @@ import React, { useRef, useState, useEffect, useMemo } from "react";
 /**
  * PixelGridCanvas
  * - Maintains per-layer pixel buffers locally.
- * - Builds pixel "diffs" for pencil/eraser strokes and fill operations.
- * - Applies those diffs immediately for responsive UI, then calls onPushHistory({type:'pixels', diffs}).
- * - Exposes an API to parent (apply/undo pixel diffs) via onRegisterPixelAPI.
+ * - Builds pixel diffs for pencil/eraser/fill and pushes them to parent history.
+ * - Exposes an API to parent via onRegisterPixelAPI:
+ *     { applyPixelDiffs, undoPixelDiffs, isEmpty, makeSnapshot }
  */
 const PixelGridCanvas = ({
   width,
@@ -15,13 +15,13 @@ const PixelGridCanvas = ({
   activeLayerId,
   layers = [],
   onRequireLayer,
-  onPickColor, // eyedropper callback
-  onPushHistory, // parent history sink: ({type:'pixels', diffs})
-  onRegisterPixelAPI, // parent gets { applyPixelDiffs, undoPixelDiffs }
+  onPickColor, // eyedropper
+  onPushHistory, // ({ type:'pixels', diffs })
+  onRegisterPixelAPI, // parent gets { applyPixelDiffs, undoPixelDiffs, isEmpty, makeSnapshot }
 }) => {
   const cellSize = 30;
 
-  // ---- Fill options (can be surfaced later) ----
+  // ---- Fill options ----
   const FILL = { tolerance: 0, contiguous: true, sampleAllLayers: false };
 
   // ---- Color helpers ----
@@ -78,28 +78,25 @@ const PixelGridCanvas = ({
   const [translate, setTranslate] = useState({ x: 0, y: 0 });
   const [scale, setScale] = useState(1);
   const [isPointerInside, setIsPointerInside] = useState(false);
-
   const handlePointerEnter = () => setIsPointerInside(true);
   const handlePointerLeave = () => setIsPointerInside(false);
 
   // ------ per-layer pixel buffers ------
-  // Map<layerId, string[][]> hex or null
+  // Map<layerId, string|null[][]>
   const [buffers, setBuffers] = useState(() => new Map());
   const makeBlank = () =>
     Array.from({ length: height }, () =>
       Array.from({ length: width }, () => null)
     );
 
-  // Keep buffers in sync with layers and size
+  // Keep buffers in sync with layers/size
   useEffect(() => {
     setBuffers((prev) => {
       const next = new Map(prev);
-
       // create buffers for new layers
       layers.forEach((ly) => {
         if (!next.has(ly.id)) next.set(ly.id, makeBlank());
       });
-
       // drop buffers for removed layers
       for (const id of Array.from(next.keys())) {
         if (!layers.some((ly) => ly.id === id)) next.delete(id);
@@ -120,13 +117,12 @@ const PixelGridCanvas = ({
     return null;
   };
 
-  // --------- Diff helpers exposed to parent ----------
+  // --------- API helpers exposed to parent ----------
   const applyPixelDiffs = (diffs) => {
     // Apply "next" values
     setBuffers((prev) => {
       const next = new Map(prev);
       const perLayerRows = new Map(); // layerId -> Set(row)
-
       for (const d of diffs) {
         if (!perLayerRows.has(d.layerId))
           perLayerRows.set(d.layerId, new Set());
@@ -174,11 +170,67 @@ const PixelGridCanvas = ({
     });
   };
 
-  // Register the API with parent
+  const hasAnyPixel = () => {
+    for (const ly of layers) {
+      const buf = buffers.get(ly.id);
+      if (!buf) continue;
+      for (let r = 0; r < height; r++) {
+        for (let c = 0; c < width; c++) {
+          if (buf[r][c]) return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  const generatePreviewPng = () => {
+    try {
+      const scale = 4; // upscale so thumbnails look nicer
+      const canvas = document.createElement("canvas");
+      canvas.width = width * scale;
+      canvas.height = height * scale;
+      const ctx = canvas.getContext("2d");
+      for (let r = 0; r < height; r++) {
+        for (let c = 0; c < width; c++) {
+          const hex = compositeAt(r, c);
+          if (!hex) continue;
+          ctx.fillStyle = hex;
+          ctx.fillRect(c * scale, r * scale, scale, scale);
+        }
+      }
+      return canvas.toDataURL("image/png");
+    } catch {
+      return null;
+    }
+  };
+
+  const makeSnapshot = () => {
+    // full, lossless snapshot the backend expects
+    return {
+      width,
+      height,
+      selectedLayerId: activeLayerId || null,
+      layers: layers.map((l) => ({
+        id: l.id,
+        name: l.name,
+        visible: !!l.visible,
+        locked: !!l.locked,
+        pixels: buffers.get(l.id) || makeBlank(),
+      })),
+      previewPng: generatePreviewPng(),
+    };
+  };
+
+  // Register API with parent
   useEffect(() => {
-    onRegisterPixelAPI?.({ applyPixelDiffs, undoPixelDiffs });
+    onRegisterPixelAPI?.({
+      applyPixelDiffs,
+      undoPixelDiffs,
+      isEmpty: () => (!hasAnyPixel() ? true : false),
+      makeSnapshot,
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onRegisterPixelAPI, buffers, layers, width, height]);
+  }, [onRegisterPixelAPI, buffers, layers, width, height, activeLayerId]);
 
   // ------ layer guard ------
   const ensureDrawableLayer = () => {
@@ -236,7 +288,7 @@ const PixelGridCanvas = ({
     setDragSource(null);
     setIsDrawing(false);
 
-    // finalize stroke: push diffs to parent history
+    // finalize stroke
     if (currentStroke.current && currentStroke.current.size > 0) {
       const diffs = Array.from(currentStroke.current.values());
       onPushHistory?.({ type: "pixels", diffs });
@@ -274,8 +326,6 @@ const PixelGridCanvas = ({
         : "grab"
       : isDragging && dragSource === "middle"
       ? "grabbing"
-      : selectedTool === "picker"
-      ? "crosshair"
       : "crosshair";
 
   // ---- diff writers ----
@@ -369,11 +419,8 @@ const PixelGridCanvas = ({
     if (selectedTool === "picker") {
       e.preventDefault();
       const sampled = compositeAt(row, col);
-      if (sampled) {
-        onPickColor?.(sampled);
-      } else {
-        onRequireLayer?.("No color at this pixel (transparent).");
-      }
+      if (sampled) onPickColor?.(sampled);
+      else onRequireLayer?.("No color at this pixel (transparent).");
       return;
     }
 
@@ -413,7 +460,6 @@ const PixelGridCanvas = ({
     if (!isDrawing) return;
     const ly = ensureDrawableLayer();
     if (!ly) return;
-
     const next = selectedTool === "pencil" ? color || "#000000" : null;
     setPixelImmediateWithDiff(ly.id, row, col, next);
   };
@@ -448,7 +494,6 @@ const PixelGridCanvas = ({
               const px = compositeAt(row, col); // composited preview
               const isLight = (row + col) % 2 === 0;
               const baseColor = isLight ? "#e6f0ff" : "#dfe9f5";
-
               return (
                 <div
                   key={`${row}-${col}`}

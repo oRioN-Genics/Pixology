@@ -13,22 +13,28 @@ import { assets } from "../assets";
  * Unified history (in-memory):
  *  - { type: 'pixels', diffs }
  *  - { type: 'layers', before, after, selectedBefore, selectedAfter }
- *
- * Undo/Redo applies to both kinds. For 'pixels', we call the PixelGrid API
- * registered by the child to apply or undo diffs.
  */
 
 const MAX_HISTORY = 100;
 
 const CanvasBoard = () => {
   const location = useLocation();
-  const { width, height } = location.state || { width: 16, height: 16 };
+  const {
+    width: initialW = 16,
+    height: initialH = 16,
+    projectName: initialName = "Untitled",
+    projectId: initialId = null, // when opening an existing project, pass this in location.state
+  } = location.state || {};
+
+  const [width] = useState(initialW);
+  const [height] = useState(initialH);
+  const [projectName] = useState(initialName);
+  const [projectId, setProjectId] = useState(initialId);
 
   const [selectedTool, setSelectedTool] = useState("pencil");
   const [currentColor, setCurrentColor] = useState("#000000");
   const [showColorPicker, setShowColorPicker] = useState(false);
 
-  // toast
   const [toastMsg, setToastMsg] = useState("");
 
   // Layers
@@ -38,7 +44,8 @@ const CanvasBoard = () => {
   const [selectedLayerId, setSelectedLayerId] = useState("l1");
 
   // Pixel canvas API ref (child registers these)
-  const pixelApiRef = useRef({ applyPixelDiffs: null, undoPixelDiffs: null });
+  // { applyPixelDiffs, undoPixelDiffs, isEmpty, makeSnapshot }
+  const pixelApiRef = useRef({});
 
   // ----- Unified History -----
   const undoStack = useRef([]);
@@ -110,20 +117,18 @@ const CanvasBoard = () => {
     }
   };
 
-  // Keyboard shortcuts: Ctrl/Cmd+Z (undo), Ctrl+Y or Ctrl/Cmd+Shift+Z (redo)
+  // Keyboard shortcuts
   useEffect(() => {
     const handler = (e) => {
       const key = e.key.toLowerCase();
       const ctrlOrCmd = e.ctrlKey || e.metaKey;
       if (!ctrlOrCmd) return;
 
-      // Undo
       if (key === "z" && !e.shiftKey) {
         e.preventDefault();
         doUndo();
         return;
       }
-      // Redo
       if (key === "y" || (key === "z" && e.shiftKey)) {
         e.preventDefault();
         doRedo();
@@ -236,8 +241,72 @@ const CanvasBoard = () => {
 
   // Receive pixel history entries from canvas
   const handlePushHistoryFromCanvas = (entry) => {
-    // entry = { type:'pixels', diffs }
-    pushHistory(entry);
+    pushHistory(entry); // entry = { type: 'pixels', diffs }
+  };
+
+  // ---------- SAVE (Option A: POST once, then PUT with id) ----------
+  const getUser = () => {
+    try {
+      return JSON.parse(localStorage.getItem("pixology:user") || "null");
+    } catch {
+      return null;
+    }
+  };
+
+  const buildPayload = (snapshot) => ({
+    name: projectName || "Untitled",
+    width,
+    height,
+    selectedLayerId,
+    layers: snapshot.layers, // [{ id, name, visible, locked, pixels }]
+    previewPng: snapshot.previewPng, // data URL (optional)
+    favorite: false, // or track real value later
+  });
+
+  const saveProject = async () => {
+    const user = getUser();
+    if (!user) {
+      setToastMsg("Please log in to save.");
+      return;
+    }
+
+    if (pixelApiRef.current.isEmpty?.()) {
+      setToastMsg("Nothing to save yet — draw something first.");
+      return;
+    }
+
+    const snapshot = pixelApiRef.current.makeSnapshot?.();
+    if (!snapshot) {
+      setToastMsg("Could not read canvas state.");
+      return;
+    }
+
+    const payload = buildPayload(snapshot);
+    const method = projectId ? "PUT" : "POST";
+    const url = projectId
+      ? `/api/projects/${projectId}?userId=${user.id}`
+      : `/api/projects?userId=${user.id}`;
+
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const text = await res.text();
+      if (!res.ok) {
+        setToastMsg(text || "Save failed");
+        return;
+      }
+      const data = JSON.parse(text); // { id, ... }
+      if (!projectId && data.id) {
+        setProjectId(data.id); // next saves become PUT
+      }
+      setToastMsg(projectId ? "Project updated." : "Project saved.");
+    } catch (e) {
+      setToastMsg("Network error while saving.");
+    }
   };
 
   return (
@@ -248,11 +317,7 @@ const CanvasBoard = () => {
           showExportButton
           ignoreAuthForExport
           showSaveButton
-          onSaveClick={() => {
-            // hook up your save logic here
-            console.log("Save clicked");
-            // e.g., call saveProject(), or dispatch an event to the canvas
-          }}
+          onSaveClick={saveProject}
         />
 
         {/* Right-edge Layers panel */}
@@ -302,14 +367,11 @@ const CanvasBoard = () => {
               onRequireLayer={(msg) => setToastMsg(msg)}
               onPickColor={(hex) => {
                 if (hex) setCurrentColor(hex);
-                setShowColorPicker(true); // keep picker open to tweak
+                setShowColorPicker(true);
               }}
               onPushHistory={handlePushHistoryFromCanvas}
               onRegisterPixelAPI={(api) => {
-                pixelApiRef.current = api || {
-                  applyPixelDiffs: null,
-                  undoPixelDiffs: null,
-                };
+                pixelApiRef.current = api || {};
               }}
             />
 

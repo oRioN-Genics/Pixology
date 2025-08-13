@@ -8,6 +8,8 @@ import ColorPicker from "../components/ColorPicker";
 import Toast from "../components/Toast";
 import { useLocation } from "react-router-dom";
 import { assets } from "../assets";
+import CanvasNotch from "../components/CanvasNotch";
+import AnimationFrameRail from "../components/AnimationFrameRail";
 
 const MAX_HISTORY = 100;
 
@@ -29,15 +31,15 @@ const CanvasBoard = () => {
   const [currentColor, setCurrentColor] = useState("#000000");
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [toastMsg, setToastMsg] = useState("");
+  const [mode, setMode] = useState("static"); // 'static' | 'animations'
 
-  // Layers
+  // Layers (static mode)
   const [layers, setLayers] = useState([
     { id: "l1", name: "Layer 1", visible: true, locked: false },
   ]);
   const [selectedLayerId, setSelectedLayerId] = useState("l1");
 
-  // Pixel canvas API
-  // expected: { applyPixelDiffs, undoPixelDiffs, isEmpty, makeSnapshot, loadFromSnapshot }
+  // Pixel canvas API (from PixelGridCanvas)
   const pixelApiRef = useRef({});
 
   // ----- Unified History -----
@@ -89,8 +91,13 @@ const CanvasBoard = () => {
   );
 
   const handleToolClick = (id) => {
-    if (id === "undo") return void doUndo();
-    if (id === "redo") return void doRedo();
+    if (id === "undo" || id === "redo") {
+      if (mode === "static") {
+        return id === "undo" ? void doUndo() : void doRedo();
+      }
+      // animation-mode undo/redo to be added later
+      return;
+    }
     setSelectedTool(id);
     if (id === "pencil" || id === "fill" || id === "picker") {
       setShowColorPicker(true);
@@ -99,9 +106,10 @@ const CanvasBoard = () => {
     }
   };
 
-  // Shortcuts
+  // Shortcuts (limit to static mode for now)
   useEffect(() => {
     const handler = (e) => {
+      if (mode !== "static") return;
       const key = e.key.toLowerCase();
       const ctrlOrCmd = e.ctrlKey || e.metaKey;
       if (!ctrlOrCmd) return;
@@ -116,9 +124,9 @@ const CanvasBoard = () => {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, []);
+  }, [mode]);
 
-  // Layer ops with history
+  // Layer ops with history (static mode)
   const deepCloneLayers = (ls) => JSON.parse(JSON.stringify(ls));
 
   const addLayer = () => {
@@ -299,7 +307,6 @@ const CanvasBoard = () => {
           const trimmed = next.trim();
           if (!trimmed) {
             setToastMsg("Name cannot be empty.");
-            // loop again (will re-prompt with a suggestion)
             attempts++;
             continue;
           }
@@ -385,7 +392,7 @@ const CanvasBoard = () => {
     const ctx = cvs.getContext("2d");
 
     if (format === "jpeg") {
-      ctx.fillStyle = "#ffffff"; // JPEG has no transparency
+      ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, cvs.width, cvs.height);
     }
 
@@ -426,6 +433,10 @@ const CanvasBoard = () => {
   };
 
   const handleExportPick = (fmt /* 'png' | 'jpeg' */) => {
+    if (mode === "animations") {
+      setToastMsg("Export for animations will be added soon.");
+      return;
+    }
     if (pixelApiRef.current?.isEmpty?.()) {
       setToastMsg("Nothing in the canvas to export.");
       return;
@@ -444,39 +455,34 @@ const CanvasBoard = () => {
       <div className="absolute inset-0 bg-gray-100" />
       <div className="relative z-10">
         <NavBar
-          showLibraryButton
-          showExportButton
-          ignoreAuthForExport
-          showSaveButton
-          onSaveClick={saveProject}
-          onBeforeExportClick={() => {
-            if (pixelApiRef.current?.isEmpty?.()) {
-              return "Nothing in the canvas to export.";
-            }
-            return true; // open popover
-          }}
-          onExportBlocked={(reason) => setToastMsg(reason)}
-          onExportPick={handleExportPick}
+          // ...props unchanged...
+          underNotch={<CanvasNotch mode={mode} onModeChange={setMode} />}
         />
 
-        {/* Right-edge Layers panel */}
-        <div className="fixed right-4 top-28 z-20">
-          <LayersPanel
-            className="w-60 sm:w-64 md:w-72 max-h-[70vh] overflow-y-auto"
-            layers={layers}
-            selectedId={selectedLayerId}
-            onSelect={setSelectedLayerId}
-            onAddLayer={addLayer}
-            onToggleVisible={toggleVisible}
-            onToggleLocked={toggleLocked}
-            onRename={renameLayer}
-            onDelete={deleteLayer}
-          />
-        </div>
+        {/* Right-edge Layers panel (static mode only) */}
+        {mode === "static" && (
+          <div className="fixed right-4 top-28 z-20">
+            <LayersPanel
+              className="w-60 sm:w-64 md:w-72 max-h-[70vh] overflow-y-auto"
+              layers={layers}
+              selectedId={selectedLayerId}
+              onSelect={setSelectedLayerId}
+              onAddLayer={addLayer}
+              onToggleVisible={toggleVisible}
+              onToggleLocked={toggleLocked}
+              onRename={renameLayer}
+              onDelete={deleteLayer}
+            />
+          </div>
+        )}
 
         {/* Main row */}
-        <div className="flex gap-4 pt-20 px-1 pr-[16rem] sm:pr-[18rem] md:pr-[20rem]">
-          {/* Left tools */}
+        <div
+          className={`flex gap-4 pt-24 px-1 ${
+            mode === "static" ? "pr-[16rem] sm:pr-[18rem] md:pr-[20rem]" : ""
+          }`}
+        >
+          {/* Left tools: now always visible (same panel for both modes) */}
           <LeftPanel className="sticky top-28 self-start">
             {tools.map((t) => (
               <ToolButton
@@ -494,27 +500,45 @@ const CanvasBoard = () => {
             ))}
           </LeftPanel>
 
-          {/* Canvas */}
+          {/* Canvas / Animation rail area */}
           <div className="flex-1 flex items-start justify-center relative">
-            <PixelGridCanvas
-              width={width}
-              height={height}
-              selectedTool={selectedTool}
-              color={currentColor}
-              activeLayerId={selectedLayerId}
-              layers={layers}
-              onRequireLayer={(msg) => setToastMsg(msg)}
-              onPickColor={(hex) => {
-                if (hex) setCurrentColor(hex);
-                setShowColorPicker(true);
-              }}
-              onPushHistory={handlePushHistoryFromCanvas}
-              onRegisterPixelAPI={(api) => {
-                pixelApiRef.current = api || {};
-              }}
-            />
+            {mode === "static" ? (
+              <PixelGridCanvas
+                width={width}
+                height={height}
+                selectedTool={selectedTool}
+                color={currentColor}
+                activeLayerId={selectedLayerId}
+                layers={layers}
+                onRequireLayer={(msg) => setToastMsg(msg)}
+                onPickColor={(hex) => {
+                  if (hex) setCurrentColor(hex);
+                  setShowColorPicker(true);
+                }}
+                onPushHistory={handlePushHistoryFromCanvas}
+                onRegisterPixelAPI={(api) => {
+                  pixelApiRef.current = api || {};
+                }}
+              />
+            ) : (
+              <div className="w-full">
+                <AnimationFrameRail
+                  width={width}
+                  height={height}
+                  selectedTool={selectedTool}
+                  color={currentColor}
+                  onRequireLayer={(msg) => setToastMsg(msg)}
+                  onPickColor={(hex) => {
+                    if (hex) {
+                      setCurrentColor(hex);
+                      setShowColorPicker(true);
+                    }
+                  }}
+                />
+              </div>
+            )}
 
-            {/* Color Picker popover */}
+            {/* Color Picker popover (now for both modes) */}
             {showColorPicker && (
               <div className="absolute left-0 top-0 mt-2">
                 <ColorPicker

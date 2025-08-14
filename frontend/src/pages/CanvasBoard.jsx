@@ -455,26 +455,44 @@ const CanvasBoard = () => {
       <div className="absolute inset-0 bg-gray-100" />
       <div className="relative z-10">
         <NavBar
-          // ...props unchanged...
+          showLibraryButton
+          showExportButton
+          ignoreAuthForExport
+          showSaveButton
+          onSaveClick={() => {
+            if (mode === "animations") {
+              // TODO: replace with real animation save once API is ready
+              setToastMsg("Saving animations will be added soon.");
+              return;
+            }
+            saveProject();
+          }}
+          onBeforeExportClick={() => {
+            if (mode === "animations")
+              return "Export for animations will be added soon.";
+            if (pixelApiRef.current?.isEmpty?.())
+              return "Nothing in the canvas to export.";
+            return true; // allow popover
+          }}
+          onExportBlocked={(reason) => setToastMsg(reason)}
+          onExportPick={handleExportPick}
           underNotch={<CanvasNotch mode={mode} onModeChange={setMode} />}
         />
 
         {/* Right-edge Layers panel (static mode only) */}
-        {mode === "static" && (
-          <div className="fixed right-4 top-28 z-20">
-            <LayersPanel
-              className="w-60 sm:w-64 md:w-72 max-h-[70vh] overflow-y-auto"
-              layers={layers}
-              selectedId={selectedLayerId}
-              onSelect={setSelectedLayerId}
-              onAddLayer={addLayer}
-              onToggleVisible={toggleVisible}
-              onToggleLocked={toggleLocked}
-              onRename={renameLayer}
-              onDelete={deleteLayer}
-            />
-          </div>
-        )}
+        <div className="fixed right-4 top-28 z-20">
+          <LayersPanel
+            className="w-60 sm:w-64 md:w-72 max-h-[70vh] overflow-y-auto"
+            layers={layers}
+            selectedId={selectedLayerId}
+            onSelect={setSelectedLayerId}
+            onAddLayer={addLayer}
+            onToggleVisible={toggleVisible}
+            onToggleLocked={toggleLocked}
+            onRename={renameLayer}
+            onDelete={deleteLayer}
+          />
+        </div>
 
         {/* Main row */}
         <div

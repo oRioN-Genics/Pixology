@@ -46,15 +46,49 @@ const AnimationFrameRail = ({
   const isPanningRef = useRef(false);
   const panStartRef = useRef({ x: 0, y: 0, tx: 0, ty: 0 });
 
-  // APIs per frame (future use)
+  // API handle per frame: Map<frameId, api>
   const frameApisRef = useRef(new Map());
 
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
   // ------- Frame ops -------
+
+  // Add a new frame to the right, seeded from the current (active) frame.
   const addFrameRight = () => {
-    setFrames((prev) => [...prev, makeBlankFrame(prev.length)]);
-    setActiveIndex((prev) => prev + 1);
+    setFrames((prev) => {
+      const curr = prev[activeIndex];
+      const prevApi = frameApisRef.current.get(curr.id);
+      const seed = prevApi?.makeSnapshot?.() || null;
+
+      // Build meta layers from seed (so layer IDs match buffers)
+      let metaLayers = null;
+      let nextActiveLayerId = null;
+
+      if (seed && Array.isArray(seed.layers) && seed.layers.length) {
+        metaLayers = seed.layers.map((l) => ({
+          id: l.id,
+          name: l.name,
+          visible: !!l.visible,
+          locked: !!l.locked,
+        }));
+        nextActiveLayerId = seed.selectedLayerId || metaLayers[0]?.id || null;
+      }
+
+      const newFrame = {
+        id: makeId("frame"),
+        name: `Frame ${prev.length + 1}`,
+        layers: metaLayers || [newDefaultLayer()],
+        activeLayerId: metaLayers ? nextActiveLayerId : undefined,
+        seedSnapshot: seed, // <-- will be consumed by onRegisterPixelAPI
+      };
+
+      const next = prev.slice();
+      next.splice(activeIndex + 1, 0, newFrame);
+      return next;
+    });
+
+    // move selection to the new frame
+    setActiveIndex((i) => i + 1);
   };
 
   const removeFrame = (frameId) => {
@@ -239,7 +273,21 @@ const AnimationFrameRail = ({
                   onPickColor={(hex) => onPickColor(hex)}
                   onPushHistory={() => {}}
                   onRegisterPixelAPI={(api) => {
+                    // store API for this frame
                     frameApisRef.current.set(frame.id, api);
+
+                    // If this frame was created with a seed, load it once
+                    if (frame.seedSnapshot) {
+                      api.loadFromSnapshot?.(frame.seedSnapshot);
+                      // clear the seed flag in state to avoid re-loading on re-render
+                      setFrames((prev) => {
+                        const i = prev.findIndex((f) => f.id === frame.id);
+                        if (i === -1) return prev;
+                        const updated = prev.slice();
+                        updated[i] = { ...prev[i], seedSnapshot: null };
+                        return updated;
+                      });
+                    }
                   }}
                 />
               </div>

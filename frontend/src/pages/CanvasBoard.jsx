@@ -33,11 +33,16 @@ const CanvasBoard = () => {
   const [toastMsg, setToastMsg] = useState("");
   const [mode, setMode] = useState("static"); // 'static' | 'animations'
 
-  // Layers (static mode)
+  // ===== Static-mode layers =====
   const [layers, setLayers] = useState([
     { id: "l1", name: "Layer 1", visible: true, locked: false },
   ]);
   const [selectedLayerId, setSelectedLayerId] = useState("l1");
+
+  // ===== Animations-mode layer bridge =====
+  const [animLayers, setAnimLayers] = useState([]);
+  const [animSelectedLayerId, setAnimSelectedLayerId] = useState(null);
+  const animLayerApiRef = useRef(null);
 
   // Pixel canvas API (from PixelGridCanvas)
   const pixelApiRef = useRef({});
@@ -479,28 +484,49 @@ const CanvasBoard = () => {
           underNotch={<CanvasNotch mode={mode} onModeChange={setMode} />}
         />
 
-        {/* Right-edge Layers panel (static mode only) */}
+        {/* Right-edge Layers panel (both modes) */}
         <div className="fixed right-4 top-28 z-20">
           <LayersPanel
             className="w-60 sm:w-64 md:w-72 max-h-[70vh] overflow-y-auto"
-            layers={layers}
-            selectedId={selectedLayerId}
-            onSelect={setSelectedLayerId}
-            onAddLayer={addLayer}
-            onToggleVisible={toggleVisible}
-            onToggleLocked={toggleLocked}
-            onRename={renameLayer}
-            onDelete={deleteLayer}
+            layers={mode === "static" ? layers : animLayers}
+            selectedId={
+              mode === "static" ? selectedLayerId : animSelectedLayerId
+            }
+            onSelect={(id) => {
+              if (mode === "static") setSelectedLayerId(id);
+              else animLayerApiRef.current?.selectLayer?.(id);
+            }}
+            onAddLayer={() => {
+              if (mode === "static") addLayer();
+              else animLayerApiRef.current?.addLayer?.();
+            }}
+            onToggleVisible={(id) => {
+              if (mode === "static") toggleVisible(id);
+              else animLayerApiRef.current?.toggleVisible?.(id);
+            }}
+            onToggleLocked={(id) => {
+              if (mode === "static") toggleLocked(id);
+              else animLayerApiRef.current?.toggleLocked?.(id);
+            }}
+            onRename={(id) => {
+              if (mode === "static") return renameLayer(id);
+              const current = (animLayers || []).find((l) => l.id === id);
+              const name = prompt("Rename layer:", current?.name ?? "");
+              if (name === null) return;
+              const trimmed = name.trim();
+              if (!trimmed) return;
+              animLayerApiRef.current?.renameLayer?.(id, trimmed);
+            }}
+            onDelete={(id) => {
+              if (mode === "static") deleteLayer(id);
+              else animLayerApiRef.current?.deleteLayer?.(id);
+            }}
           />
         </div>
 
         {/* Main row */}
-        <div
-          className={`flex gap-4 pt-24 px-1 ${
-            mode === "static" ? "pr-[16rem] sm:pr-[18rem] md:pr-[20rem]" : ""
-          }`}
-        >
-          {/* Left tools: now always visible (same panel for both modes) */}
+        <div className="flex gap-4 pt-24 px-1 pr-[16rem] sm:pr-[18rem] md:pr-[20rem]">
+          {/* Left tools */}
           <LeftPanel className="sticky top-28 self-start">
             {tools.map((t) => (
               <ToolButton
@@ -552,11 +578,19 @@ const CanvasBoard = () => {
                       setShowColorPicker(true);
                     }
                   }}
+                  // <<< Animations-mode Layer bridge
+                  onActiveFrameMeta={({ layers, selectedLayerId }) => {
+                    setAnimLayers(layers || []);
+                    setAnimSelectedLayerId(selectedLayerId ?? null);
+                  }}
+                  onExposeLayerAPI={(api) => {
+                    animLayerApiRef.current = api || null;
+                  }}
                 />
               </div>
             )}
 
-            {/* Color Picker popover (now for both modes) */}
+            {/* Color Picker popover */}
             {showColorPicker && (
               <div className="absolute left-0 top-0 mt-2">
                 <ColorPicker

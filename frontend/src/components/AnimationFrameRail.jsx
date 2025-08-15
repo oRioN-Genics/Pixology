@@ -21,6 +21,11 @@ const makeBlankFrame = (index = 0) => {
   };
 };
 
+/**
+ * Props added for layer bridging:
+ * - onActiveFrameMeta?: ({frameId, layers, selectedLayerId}) => void
+ * - onExposeLayerAPI?: (apiObject) => void // selectLayer, addLayer, toggleVisible, toggleLocked, renameLayer, deleteLayer
+ */
 const AnimationFrameRail = ({
   width = 16,
   height = 16,
@@ -32,6 +37,9 @@ const AnimationFrameRail = ({
   minScale = 0.2,
   maxScale = 3,
   zoomStep = 0.1,
+
+  onActiveFrameMeta,
+  onExposeLayerAPI,
 }) => {
   const [frames, setFrames] = useState([makeBlankFrame(0)]);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -48,22 +56,131 @@ const AnimationFrameRail = ({
 
   // API handle per frame: Map<frameId, api>
   const frameApisRef = useRef(new Map());
+  const activeIndexRef = useRef(activeIndex);
+  useEffect(() => {
+    activeIndexRef.current = activeIndex;
+  }, [activeIndex]);
 
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
-  // ------- Frame ops -------
+  // ------- Notify parent about active frame meta -------
+  useEffect(() => {
+    const f = frames[activeIndex];
+    if (!f) return;
+    onActiveFrameMeta?.({
+      frameId: f.id,
+      layers: f.layers,
+      selectedLayerId: f.activeLayerId ?? null,
+    });
+  }, [frames, activeIndex, onActiveFrameMeta]);
 
-  // Add a new frame to the right, seeded from the current (active) frame.
+  // ------- Layer API exposed to parent -------
+  useEffect(() => {
+    const getActiveFrame = (arr) => arr[activeIndexRef.current];
+
+    const api = {
+      selectLayer: (id) => {
+        setFrames((prev) => {
+          const next = prev.slice();
+          const f = getActiveFrame(next);
+          if (!f) return prev;
+          if (f.activeLayerId === id) return prev;
+          next[activeIndexRef.current] = { ...f, activeLayerId: id };
+          return next;
+        });
+      },
+      addLayer: () => {
+        setFrames((prev) => {
+          const next = prev.slice();
+          const f = getActiveFrame(next);
+          if (!f) return prev;
+          const id = makeId("layer");
+          const newLayer = {
+            id,
+            name: `Layer ${f.layers.length + 1}`,
+            visible: true,
+            locked: false,
+          };
+          next[activeIndexRef.current] = {
+            ...f,
+            layers: [newLayer, ...f.layers],
+            activeLayerId: id,
+          };
+          return next;
+        });
+      },
+      toggleVisible: (id) => {
+        setFrames((prev) => {
+          const next = prev.slice();
+          const f = getActiveFrame(next);
+          if (!f) return prev;
+          next[activeIndexRef.current] = {
+            ...f,
+            layers: f.layers.map((l) =>
+              l.id === id ? { ...l, visible: !l.visible } : l
+            ),
+          };
+          return next;
+        });
+      },
+      toggleLocked: (id) => {
+        setFrames((prev) => {
+          const next = prev.slice();
+          const f = getActiveFrame(next);
+          if (!f) return prev;
+          next[activeIndexRef.current] = {
+            ...f,
+            layers: f.layers.map((l) =>
+              l.id === id ? { ...l, locked: !l.locked } : l
+            ),
+          };
+          return next;
+        });
+      },
+      renameLayer: (id, newName) => {
+        setFrames((prev) => {
+          const next = prev.slice();
+          const f = getActiveFrame(next);
+          if (!f) return prev;
+          next[activeIndexRef.current] = {
+            ...f,
+            layers: f.layers.map((l) =>
+              l.id === id ? { ...l, name: newName } : l
+            ),
+          };
+          return next;
+        });
+      },
+      deleteLayer: (id) => {
+        setFrames((prev) => {
+          const next = prev.slice();
+          const f = getActiveFrame(next);
+          if (!f) return prev;
+          const after = f.layers.filter((l) => l.id !== id);
+          const nextActive =
+            f.activeLayerId === id ? after[0]?.id ?? null : f.activeLayerId;
+          next[activeIndexRef.current] = {
+            ...f,
+            layers: after,
+            activeLayerId: nextActive,
+          };
+          return next;
+        });
+      },
+    };
+
+    onExposeLayerAPI?.(api);
+  }, [onExposeLayerAPI]);
+
+  // ------- Frame ops (duplicate drawings on add) -------
   const addFrameRight = () => {
     setFrames((prev) => {
       const curr = prev[activeIndex];
       const prevApi = frameApisRef.current.get(curr.id);
       const seed = prevApi?.makeSnapshot?.() || null;
 
-      // Build meta layers from seed (so layer IDs match buffers)
       let metaLayers = null;
       let nextActiveLayerId = null;
-
       if (seed && Array.isArray(seed.layers) && seed.layers.length) {
         metaLayers = seed.layers.map((l) => ({
           id: l.id,
@@ -79,7 +196,7 @@ const AnimationFrameRail = ({
         name: `Frame ${prev.length + 1}`,
         layers: metaLayers || [newDefaultLayer()],
         activeLayerId: metaLayers ? nextActiveLayerId : undefined,
-        seedSnapshot: seed, // <-- will be consumed by onRegisterPixelAPI
+        seedSnapshot: seed,
       };
 
       const next = prev.slice();
@@ -87,7 +204,6 @@ const AnimationFrameRail = ({
       return next;
     });
 
-    // move selection to the new frame
     setActiveIndex((i) => i + 1);
   };
 
@@ -97,7 +213,6 @@ const AnimationFrameRail = ({
       const idx = prev.findIndex((f) => f.id === frameId);
       const next = prev.filter((f) => f.id !== frameId);
 
-      // adjust active index
       setActiveIndex((i) => {
         if (idx === i) return Math.max(0, i - 1);
         if (idx < i) return Math.max(0, i - 1);
@@ -279,7 +394,7 @@ const AnimationFrameRail = ({
                     // If this frame was created with a seed, load it once
                     if (frame.seedSnapshot) {
                       api.loadFromSnapshot?.(frame.seedSnapshot);
-                      // clear the seed flag in state to avoid re-loading on re-render
+                      // clear seed flag so it doesn't reapply
                       setFrames((prev) => {
                         const i = prev.findIndex((f) => f.id === frame.id);
                         if (i === -1) return prev;

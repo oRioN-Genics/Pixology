@@ -10,6 +10,7 @@ import { useLocation } from "react-router-dom";
 import { assets } from "../assets";
 import CanvasNotch from "../components/CanvasNotch";
 import AnimationFrameRail from "../components/AnimationFrameRail";
+import TimelinePanel from "../components/TimelinePanel";
 
 const MAX_HISTORY = 100;
 
@@ -32,6 +33,7 @@ const CanvasBoard = () => {
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [toastMsg, setToastMsg] = useState("");
   const [mode, setMode] = useState("static"); // 'static' | 'animations'
+  const [framesCount, setFramesCount] = useState(0);
 
   // ===== Static-mode layers =====
   const [layers, setLayers] = useState([
@@ -525,7 +527,11 @@ const CanvasBoard = () => {
         </div>
 
         {/* Main row */}
-        <div className="flex gap-4 pt-24 px-1 pr-[16rem] sm:pr-[18rem] md:pr-[20rem]">
+        <div
+          className={`flex gap-4 pt-24 px-1 ${
+            mode === "animations" ? "pb-28" : ""
+          }`}
+        >
           {/* Left tools */}
           <LeftPanel className="sticky top-28 self-start">
             {tools.map((t) => (
@@ -586,6 +592,7 @@ const CanvasBoard = () => {
                   onExposeLayerAPI={(api) => {
                     animLayerApiRef.current = api || null;
                   }}
+                  onFramesCountChange={(n) => setFramesCount(n)}
                 />
               </div>
             )}
@@ -610,6 +617,14 @@ const CanvasBoard = () => {
 
       {/* Toast */}
       {toastMsg && <Toast message={toastMsg} onClose={() => setToastMsg("")} />}
+
+      {/* Bottom Timeline (animation mode only) */}
+      {mode === "animations" && (
+        <TimelinePanel
+          framesCount={framesCount}
+          onToast={(msg) => setToastMsg(msg)}
+        />
+      )}
     </div>
   );
 };

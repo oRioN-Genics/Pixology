@@ -21,11 +21,6 @@ const makeBlankFrame = (index = 0) => {
   };
 };
 
-/**
- * Props added for layer bridging:
- * - onActiveFrameMeta?: ({frameId, layers, selectedLayerId}) => void
- * - onExposeLayerAPI?: (apiObject) => void // selectLayer, addLayer, toggleVisible, toggleLocked, renameLayer, deleteLayer
- */
 const AnimationFrameRail = ({
   width = 16,
   height = 16,
@@ -40,6 +35,7 @@ const AnimationFrameRail = ({
 
   onActiveFrameMeta,
   onExposeLayerAPI,
+  onFramesCountChange,
 }) => {
   const [frames, setFrames] = useState([makeBlankFrame(0)]);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -73,6 +69,11 @@ const AnimationFrameRail = ({
       selectedLayerId: f.activeLayerId ?? null,
     });
   }, [frames, activeIndex, onActiveFrameMeta]);
+
+  // Report frames count to parent for the timeline's validation
+  useEffect(() => {
+    onFramesCountChange?.(frames.length);
+  }, [frames.length, onFramesCountChange]);
 
   // ------- Layer API exposed to parent -------
   useEffect(() => {
@@ -231,10 +232,8 @@ const AnimationFrameRail = ({
 
     const onMouseDown = (e) => {
       if (e.button !== 1) return; // middle
-      // If inside a canvas, let the canvas handle its own pan
       const onCanvas = e.target.closest("[data-canvas-interactive='true']");
       if (onCanvas) return;
-
       e.preventDefault();
       e.stopPropagation();
       isPanningRef.current = true;
@@ -279,12 +278,8 @@ const AnimationFrameRail = ({
     const onWheel = (e) => {
       const overCanvas = !!e.target.closest("[data-canvas-interactive='true']");
       const forceViewport = e.ctrlKey || e.metaKey;
-
-      // If the wheel is over a canvas and Ctrl/Cmd is NOT held,
-      // let the canvas handle its own wheel zoom.
       if (overCanvas && !forceViewport) return;
 
-      // Otherwise, zoom the viewport (background or Ctrl/Cmd over canvas)
       e.preventDefault();
       e.stopPropagation();
 
@@ -301,7 +296,6 @@ const AnimationFrameRail = ({
       );
       if (newScale === oldScale) return;
 
-      // Keep the point under the cursor fixed by adjusting translate
       const cx = mouseX - translate.x;
       const cy = mouseY - translate.y;
       const k = newScale / oldScale;
@@ -388,13 +382,10 @@ const AnimationFrameRail = ({
                   onPickColor={(hex) => onPickColor(hex)}
                   onPushHistory={() => {}}
                   onRegisterPixelAPI={(api) => {
-                    // store API for this frame
                     frameApisRef.current.set(frame.id, api);
-
-                    // If this frame was created with a seed, load it once
                     if (frame.seedSnapshot) {
                       api.loadFromSnapshot?.(frame.seedSnapshot);
-                      // clear seed flag so it doesn't reapply
+                      // clear seed once applied
                       setFrames((prev) => {
                         const i = prev.findIndex((f) => f.id === frame.id);
                         if (i === -1) return prev;

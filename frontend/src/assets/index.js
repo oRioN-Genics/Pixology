@@ -21,6 +21,14 @@ import colorPickerIcon from "./tools/eyedropperIcon.png";
 import undoIcon from "./tools/undoIcon.png";
 import redoIcon from "./tools/redoIcon.png";
 
+// preview tools
+import firstFrameIcon from "./tools/preview_tools/firstFrameIcon.png";
+import prevFrameIcon from "./tools/preview_tools/firstFrameIcon.png";
+import playIcon from "./tools/preview_tools/playIcon.png";
+import nextFrameIcon from "./tools/preview_tools/nextFrameIcon.png";
+import lastFrameIcon from "./tools/preview_tools/lastFrameIcon.png";
+import stopIcon from "./tools/preview_tools/stopIcon.png";
+
 export const assets = {
   Icon,
   CuteGhost_1,
@@ -42,4 +50,10 @@ export const assets = {
   colorPickerIcon,
   undoIcon,
   redoIcon,
+  firstFrameIcon,
+  prevFrameIcon,
+  playIcon,
+  nextFrameIcon,
+  lastFrameIcon,
+  stopIcon,
 };

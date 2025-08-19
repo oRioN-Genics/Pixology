@@ -71,7 +71,6 @@ const LibraryPage = () => {
     };
   }, [user, navigate, isFavTab]);
 
-  // Open: we don't need kind—CanvasBoard probes static first, then animation.
   const openProject = (p) => {
     navigate("/canvas", {
       state: {

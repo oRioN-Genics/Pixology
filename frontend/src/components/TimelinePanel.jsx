@@ -6,14 +6,6 @@ const makeId = (p = "anim") =>
     .toString(36)
     .slice(-4)}`;
 
-/**
- * Props:
- * - className
- * - framesCount
- * - onToast
- * - initialAnimations: [{id, name, frames:number[]}]
- * - onExposeTimelineAPI: (api) => void
- */
 const TimelinePanel = ({
   className = "",
   framesCount = 0,
@@ -43,7 +35,7 @@ const TimelinePanel = ({
   // Single-frame selection: {animId, frameNum, _idx}
   const [selection, setSelection] = useState(null);
 
-  // Track if a blocking prompt is open (so our global Delete handler won't run)
+  // Track if a blocking prompt is open
   const isPromptOpenRef = useRef(false);
 
   // ---------- seed from parent when provided (guarded) ----------
@@ -239,7 +231,7 @@ const TimelinePanel = ({
             maxFrames === 1 ? "" : "s"
           } in the rail.`
         );
-        return false; // ✅ do nothing to state
+        return false;
       }
 
       // valid -> update only the target block
@@ -470,7 +462,7 @@ const TimelinePanel = ({
                               className="px-1.5 py-0.5 text[11px] leading-none rounded-md border border-[#cfe0f1] hover:bg-[#eef6ff] whitespace-nowrap"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                // Don't preselect; only select after a successful add
+                                // Only select after a successful add
                                 const added = promptAddFrame(anim.id);
                                 if (added) setSelectedAnimId(anim.id);
                                 // Clear selection to avoid any Delete key side effects

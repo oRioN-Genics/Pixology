@@ -16,7 +16,7 @@ const makeBlankFrame = (index = 0) => {
   return {
     id: makeId("frame"),
     name: `Frame ${index + 1}`,
-    layers: [layer], // topmost first
+    layers: [layer],
     activeLayerId: layer.id, // default active layer
   };
 };

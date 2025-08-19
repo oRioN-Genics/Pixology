@@ -25,7 +25,7 @@ const NavBar = ({
   onBeforeExportClick, // () => true | string
   onExportBlocked, // (reason: string) => void
   onExportPick, // (fmt: 'png' | 'jpeg') => void
-  underNotch, // ReactNode: renders attached under the bar (Canvas page only)
+  underNotch,
 }) => {
   const navigate = useNavigate();
   const location = useLocation();

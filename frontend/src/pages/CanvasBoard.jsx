@@ -57,7 +57,7 @@ const CanvasBoard = () => {
     [initialTimelineAnims]
   );
 
-  // Pixel canvas API (from PixelGridCanvas)
+  // Pixel canvas API
   const pixelApiRef = useRef({});
 
   // ----- Static-mode history -----
@@ -128,7 +128,7 @@ const CanvasBoard = () => {
     }
   };
 
-  // Shortcuts: support BOTH modes (static & animations)
+  // Shortcuts
   useEffect(() => {
     const handler = (e) => {
       const key = e.key.toLowerCase();
@@ -154,7 +154,6 @@ const CanvasBoard = () => {
     return () => window.removeEventListener("keydown", handler);
   }, [mode]);
 
-  // Layer ops with history (static mode)
   const deepCloneLayers = (ls) => JSON.parse(JSON.stringify(ls));
 
   const addLayer = () => {
@@ -257,7 +256,7 @@ const CanvasBoard = () => {
   // From canvas: pixel history
   const handlePushHistoryFromCanvas = (entry) => pushHistory(entry);
 
-  // ---------- SAVE (unchanged) ----------
+  // ---------- SAVE----------
   const getUser = () => {
     try {
       return JSON.parse(localStorage.getItem("pixology:user") || "null");
@@ -571,7 +570,7 @@ const CanvasBoard = () => {
     }
   };
 
-  // ---------- EXPORT (unchanged) ----------
+  // ---------- EXPORT ----------
   const renderSnapshotToDataURL = (
     snapshot,
     format = "png",

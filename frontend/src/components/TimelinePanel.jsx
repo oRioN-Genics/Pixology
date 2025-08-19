@@ -8,25 +8,25 @@ const makeId = (p = "anim") =>
 
 const TimelinePanel = ({
   className = "",
-  framesCount = 0, // how many frames exist in the rail
-  onToast = () => {}, // call to show toast in CanvasBoard
+  framesCount = 0,
+  onToast = () => {},
 }) => {
   const [anims, setAnims] = useState([]); // [{id, name, frames:number[]}]
   const [untitledIdx, setUntitledIdx] = useState(1);
   const [selectedAnimId, setSelectedAnimId] = useState(null);
   const [collapsed, setCollapsed] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false); // <-- NEW
+  const [isPlaying, setIsPlaying] = useState(false);
 
   // Editing state (animation title)
   const [editingId, setEditingId] = useState(null);
   const [editingText, setEditingText] = useState("");
   const inputRef = useRef(null);
 
-  // Drag state (within a block)
+  // Drag state
   const dragInfo = useRef(null); // { animId, frameNum }
 
-  // Selection state for frames (single-select, supports duplicates via _idx)
-  const [selection, setSelection] = useState(null); // {animId, frameNum, _idx} | null
+  // Single-frame selection: {animId, frameNum, _idx} where _idx is the Nth occurrence of frameNum
+  const [selection, setSelection] = useState(null);
 
   useEffect(() => {
     if (editingId && inputRef.current) {
@@ -35,14 +35,25 @@ const TimelinePanel = ({
     }
   }, [editingId]);
 
-  // Stop playing if no block is selected
   useEffect(() => {
     if (!selectedAnimId && isPlaying) setIsPlaying(false);
   }, [selectedAnimId, isPlaying]);
 
-  // Global keyboard handler for Delete/Backspace to remove selected frame
+  // --- helper: compute occurrence index among equal numbers up to idx ---
+  const occurrenceIndex = (frames, n, idx) => {
+    let count = 0;
+    for (let i = 0; i <= idx; i++) {
+      if (frames[i] === n) count++;
+    }
+    return count - 1; // zero-based
+  };
+
+  // Global Delete to remove selected frame
   useEffect(() => {
     const onKey = (e) => {
+      // don't delete while editing a name
+      if (editingId) return;
+
       if (!selection) return;
       if (e.key === "Delete" || e.key === "Backspace") {
         e.preventDefault();
@@ -72,9 +83,8 @@ const TimelinePanel = ({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selection]);
+  }, [selection, editingId]);
 
-  // Click on background should clear frame selection (not the selected anim)
   const handleBackgroundMouseDown = (e) => {
     const onChip = e.target.closest('[data-frame-chip="1"]');
     const onTitle = e.target.closest('[data-anim-title="1"]');
@@ -137,7 +147,6 @@ const TimelinePanel = ({
       return;
     }
 
-    // Allow duplicates
     setAnims((prev) =>
       prev.map((a) => {
         if (a.id !== animId) return a;
@@ -147,12 +156,15 @@ const TimelinePanel = ({
   };
 
   // Drag logic (reorder within the same animation)
-  const onFrameDragStart = (e, animId, frameNum) => {
-    dragInfo.current = { animId, frameNum };
-    e.dataTransfer.setData("text/plain", `${animId}:${frameNum}`);
+  const onFrameDragStart = (e, anim, frameNum, idxInArray) => {
+    dragInfo.current = { animId: anim.id, frameNum };
+    e.dataTransfer.setData("text/plain", `${anim.id}:${frameNum}`);
     e.dataTransfer.effectAllowed = "move";
-    setSelection({ animId, frameNum, _idx: 0 }); // corrected on click below
-    setSelectedAnimId(animId);
+
+    // set selection using occurrence index
+    const occIdx = occurrenceIndex(anim.frames, frameNum, idxInArray);
+    setSelection({ animId: anim.id, frameNum, _idx: occIdx });
+    setSelectedAnimId(anim.id);
   };
 
   const onFrameDragOver = (e) => {
@@ -165,8 +177,6 @@ const TimelinePanel = ({
     const info = dragInfo.current;
     dragInfo.current = null;
     if (!info) return;
-
-    // Only reorder inside the SAME animation block
     if (info.animId !== targetAnimId) return;
 
     setAnims((prev) =>
@@ -217,7 +227,7 @@ const TimelinePanel = ({
       onMouseDownCapture={handleBackgroundMouseDown}
     >
       <div className="container mx-auto px-2 md:px-6 py-2 relative">
-        {/* Minimize / Maximize toggle (top-right of panel) */}
+        {/* Min/Max */}
         <button
           aria-label={collapsed ? "Maximize timeline" : "Minimize timeline"}
           title={collapsed ? "Maximize" : "Minimize"}
@@ -229,14 +239,13 @@ const TimelinePanel = ({
           </span>
         </button>
 
-        {/* Collapsed view: tiny bar */}
         {collapsed ? (
           <div className="h-6 flex items-center justify-center text-xs text-[#3c638c]">
             Timeline (collapsed)
           </div>
         ) : (
           <>
-            {/* ========== Row 1: Transport controls (centered) ========== */}
+            {/* Transport */}
             <div className="w-full flex items-center justify-center">
               <div className="flex items-center gap-2">
                 {[
@@ -254,7 +263,7 @@ const TimelinePanel = ({
                   },
                   {
                     key: "play",
-                    icon: isPlaying ? assets.stopIcon : assets.playIcon, // <-- TOGGLE
+                    icon: isPlaying ? assets.stopIcon : assets.playIcon,
                     title: isPlaying ? "Stop" : "Play",
                     onClick: () => setIsPlaying((p) => !p),
                   },
@@ -296,9 +305,8 @@ const TimelinePanel = ({
               </div>
             </div>
 
-            {/* ========== Row 2: two columns ========== */}
+            {/* Two columns */}
             <div className="mt-3 grid grid-cols-[auto,1fr] gap-4 items-start">
-              {/* Left column: Add animation */}
               <div className="shrink-0">
                 <button
                   onClick={addAnimation}
@@ -308,7 +316,6 @@ const TimelinePanel = ({
                 </button>
               </div>
 
-              {/* Right column: Animations rail */}
               <div className="overflow-x-auto pb-3">
                 <div className="flex gap-4">
                   {anims.map((anim) => {
@@ -326,7 +333,7 @@ const TimelinePanel = ({
                           if (!clickedBtn) setSelectedAnimId(anim.id);
                         }}
                       >
-                        {/* Block header: title + controls */}
+                        {/* Header */}
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex-1">
                             {editingId === anim.id ? (
@@ -358,10 +365,9 @@ const TimelinePanel = ({
                           </div>
 
                           <div className="flex items-center gap-1.5 shrink-0">
-                            {/* Smaller Add frame button */}
                             <button
                               data-add-frame="1"
-                              className="px-1.5 py-0.5 text-[11px] leading-none rounded-md border border-[#cfe0f1] hover:bg-[#eef6ff] whitespace-nowrap"
+                              className="px-1.5 py-0.5 text[11px] leading-none rounded-md border border-[#cfe0f1] hover:bg-[#eef6ff] whitespace-nowrap"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 promptAddFrame(anim.id);
@@ -371,7 +377,6 @@ const TimelinePanel = ({
                             >
                               Add frame
                             </button>
-                            {/* Compact delete animation button with icon */}
                             <button
                               data-del-anim="1"
                               aria-label="Delete animation"
@@ -391,7 +396,7 @@ const TimelinePanel = ({
                           </div>
                         </div>
 
-                        {/* Frames row (chips) */}
+                        {/* Frames row */}
                         <div
                           className="mt-2 flex items-center gap-2 overflow-x-auto"
                           onDragOver={onFrameDragOver}
@@ -403,7 +408,9 @@ const TimelinePanel = ({
                               selection &&
                               selection.animId === anim.id &&
                               selection.frameNum === n &&
-                              selection._idx === idx;
+                              selection._idx ===
+                                occurrenceIndex(anim.frames, n, idx);
+
                             return (
                               <div
                                 key={`${n}-${idx}`}
@@ -415,23 +422,23 @@ const TimelinePanel = ({
                                     : "",
                                 ].join(" ")}
                                 draggable
-                                onDragStart={(e) => {
-                                  onFrameDragStart(e, anim.id, n);
-                                  setSelection({
-                                    animId: anim.id,
-                                    frameNum: n,
-                                    _idx: idx,
-                                  });
-                                }}
+                                onDragStart={(e) =>
+                                  onFrameDragStart(e, anim, n, idx)
+                                }
                                 onDragOver={onFrameDragOver}
                                 onDrop={(e) => onFrameDropOnChip(e, anim.id, n)}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setSelectedAnimId(anim.id);
+                                  const occIdx = occurrenceIndex(
+                                    anim.frames,
+                                    n,
+                                    idx
+                                  );
                                   setSelection({
                                     animId: anim.id,
                                     frameNum: n,
-                                    _idx: idx,
+                                    _idx: occIdx,
                                   });
                                 }}
                                 title={`Frame ${n} (click to select, Delete to remove)`}
@@ -440,10 +447,15 @@ const TimelinePanel = ({
                                   if (e.key === "Enter" || e.key === " ") {
                                     e.preventDefault();
                                     setSelectedAnimId(anim.id);
+                                    const occIdx = occurrenceIndex(
+                                      anim.frames,
+                                      n,
+                                      idx
+                                    );
                                     setSelection({
                                       animId: anim.id,
                                       frameNum: n,
-                                      _idx: idx,
+                                      _idx: occIdx,
                                     });
                                   }
                                 }}
@@ -454,7 +466,6 @@ const TimelinePanel = ({
                               </div>
                             );
                           })}
-                          {/* Drop zone at the end for appending via drag */}
                           <div className="w-6 h-10" />
                         </div>
                       </div>
@@ -463,7 +474,6 @@ const TimelinePanel = ({
                 </div>
               </div>
             </div>
-            {/* /Row 2 */}
           </>
         )}
       </div>

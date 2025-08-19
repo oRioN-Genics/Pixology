@@ -47,6 +47,7 @@ public class ProjectService {
             return l;
         }).toList());
         p.setFrames(null);
+        p.setAnimations(null);
         p.setPreviewPng(normalizeDataUrl(req.getPreviewPng()));
         p.setFavorite(Boolean.TRUE.equals(req.getFavorite()));
         p.setCreatedAt(Instant.now());
@@ -86,6 +87,7 @@ public class ProjectService {
             return l;
         }).toList());
         p.setFrames(null);
+        p.setAnimations(null);
         p.setPreviewPng(normalizeDataUrl(req.getPreviewPng()));
         p.setFavorite(Boolean.TRUE.equals(req.getFavorite()));
         p.setUpdatedAt(Instant.now());
@@ -126,6 +128,17 @@ public class ProjectService {
             }).toList());
             return f;
         }).toList());
+        if (req.getAnimations() != null) {
+            p.setAnimations(req.getAnimations().stream().map(adto -> {
+                AnimationBlock b = new AnimationBlock();
+                b.setId(adto.getId());
+                b.setName(adto.getName());
+                b.setFrames(adto.getFrames());
+                return b;
+            }).toList());
+        } else {
+            p.setAnimations(null);
+        }
         p.setPreviewPng(normalizeDataUrl(req.getPreviewPng()));
         p.setFavorite(Boolean.TRUE.equals(req.getFavorite()));
         p.setCreatedAt(Instant.now());
@@ -172,6 +185,17 @@ public class ProjectService {
             }).toList());
             return f;
         }).toList());
+        if (req.getAnimations() != null) {
+            p.setAnimations(req.getAnimations().stream().map(adto -> {
+                AnimationBlock b = new AnimationBlock();
+                b.setId(adto.getId());
+                b.setName(adto.getName());
+                b.setFrames(adto.getFrames());
+                return b;
+            }).toList());
+        } else {
+            p.setAnimations(null);
+        }
         p.setPreviewPng(normalizeDataUrl(req.getPreviewPng()));
         p.setFavorite(Boolean.TRUE.equals(req.getFavorite()));
         p.setUpdatedAt(Instant.now());
@@ -186,16 +210,14 @@ public class ProjectService {
     }
 
     // ---------- SHARED list/get/delete/favorite ----------
-    // legacy signature
     public List<ProjectSummaryResponse> listForUser(String userId, Boolean favorite) {
         return listForUser(userId, favorite, null);
     }
 
-    // new: with kind filter ("static" | "animation", case-insensitive)
     public List<ProjectSummaryResponse> listForUser(String userId, Boolean favorite, String kindStr) {
         validateUser(userId);
 
-        ProjectKind kindFilter = parseKind(kindStr); // may be null
+        ProjectKind kindFilter = parseKind(kindStr);
         List<Project> rows = (favorite == null)
                 ? repo.findAllByUserIdOrderByUpdatedAtDesc(userId)
                 : repo.findAllByUserIdAndFavoriteOrderByUpdatedAtDesc(userId, favorite);
@@ -267,7 +289,6 @@ public class ProjectService {
         };
     }
 
-    // ---------- mappers ----------
     private ProjectSummaryResponse toSummary(Project p) {
         return new ProjectSummaryResponse(
                 p.getId(),
@@ -302,6 +323,7 @@ public class ProjectService {
         r.setWidth(p.getWidth());
         r.setHeight(p.getHeight());
         r.setFrames(p.getFrames());
+        r.setAnimations(p.getAnimations());
         r.setFavorite(p.isFavorite());
         r.setPreviewPng(p.getPreviewPng());
         r.setCreatedAt(p.getCreatedAt());

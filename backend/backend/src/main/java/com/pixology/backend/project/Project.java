@@ -25,12 +25,15 @@ public class Project {
     /** STATIC | ANIMATION (defaults to STATIC for old docs) */
     private ProjectKind kind = ProjectKind.STATIC;
 
-    // ---------- STATIC fields (unchanged) ----------
+    // ---------- STATIC fields ----------
     private String selectedLayerId;
     private List<ProjectLayer> layers;
 
     // ---------- ANIMATION fields ----------
     private List<AnimationFrame> frames;
+
+    // NEW: Timeline animation blocks (names + frame lists)
+    private List<AnimationBlock> animations;
 
     // ---------- Common ----------
     private String previewPng;
@@ -69,6 +72,9 @@ public class Project {
 
     public List<AnimationFrame> getFrames() { return frames; }
     public void setFrames(List<AnimationFrame> frames) { this.frames = frames; }
+
+    public List<AnimationBlock> getAnimations() { return animations; }
+    public void setAnimations(List<AnimationBlock> animations) { this.animations = animations; }
 
     public String getPreviewPng() { return previewPng; }
     public void setPreviewPng(String previewPng) { this.previewPng = previewPng; }

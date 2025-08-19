@@ -1,5 +1,6 @@
 package com.pixology.backend.project.dto;
 
+import com.pixology.backend.project.AnimationBlock;
 import com.pixology.backend.project.AnimationFrame;
 import java.time.Instant;
 import java.util.List;
@@ -10,6 +11,8 @@ public class AnimationDetailResponse {
     private int width;
     private int height;
     private List<AnimationFrame> frames;
+    // NEW: timeline blocks returned to client
+    private List<AnimationBlock> animations;
     private boolean favorite;
     private String previewPng;
     private Instant createdAt;
@@ -31,6 +34,9 @@ public class AnimationDetailResponse {
 
     public List<AnimationFrame> getFrames() { return frames; }
     public void setFrames(List<AnimationFrame> frames) { this.frames = frames; }
+
+    public List<AnimationBlock> getAnimations() { return animations; }
+    public void setAnimations(List<AnimationBlock> animations) { this.animations = animations; }
 
     public boolean isFavorite() { return favorite; }
     public void setFavorite(boolean favorite) { this.favorite = favorite; }

@@ -6,12 +6,27 @@ const makeId = (p = "anim") =>
     .toString(36)
     .slice(-4)}`;
 
+/**
+ * Props:
+ * - className
+ * - framesCount
+ * - onToast
+ * - initialAnimations: [{id, name, frames:number[]}]
+ * - onExposeTimelineAPI: (api) => void
+ */
 const TimelinePanel = ({
   className = "",
   framesCount = 0,
   onToast = () => {},
+  initialAnimations = [],
+  onExposeTimelineAPI,
 }) => {
   const [anims, setAnims] = useState([]); // [{id, name, frames:number[]}]
+  const animsRef = useRef(anims);
+  useEffect(() => {
+    animsRef.current = anims;
+  }, [anims]);
+
   const [untitledIdx, setUntitledIdx] = useState(1);
   const [selectedAnimId, setSelectedAnimId] = useState(null);
   const [collapsed, setCollapsed] = useState(false);
@@ -25,8 +40,66 @@ const TimelinePanel = ({
   // Drag state
   const dragInfo = useRef(null); // { animId, frameNum }
 
-  // Single-frame selection: {animId, frameNum, _idx} where _idx is the Nth occurrence of frameNum
+  // Single-frame selection: {animId, frameNum, _idx}
   const [selection, setSelection] = useState(null);
+
+  // Track if a blocking prompt is open (so our global Delete handler won't run)
+  const isPromptOpenRef = useRef(false);
+
+  // ---------- seed from parent when provided (guarded) ----------
+  const didSeedRef = useRef(false);
+  useEffect(() => {
+    if (didSeedRef.current) return;
+    if (!Array.isArray(initialAnimations)) return;
+
+    const seeded = (initialAnimations || []).map((a) => ({
+      id: a.id || makeId(),
+      name: a.name || "untitled animation",
+      frames: Array.isArray(a.frames) ? a.frames.slice() : [],
+    }));
+    setAnims(seeded);
+
+    // compute next untitled index
+    const untitledNums = seeded
+      .map((a) => a.name?.match(/^untitled animation\s+(\d+)$/i)?.[1])
+      .filter(Boolean)
+      .map((s) => parseInt(s, 10))
+      .filter((n) => Number.isFinite(n));
+    const next = untitledNums.length ? Math.max(...untitledNums) + 1 : 1;
+    setUntitledIdx(next);
+
+    didSeedRef.current = true;
+  }, [initialAnimations]);
+
+  // ---------- expose API to parent (collect & load) ----------
+  useEffect(() => {
+    if (!onExposeTimelineAPI) return;
+    const api = {
+      collectTimelineSnapshot: () =>
+        (animsRef.current || []).map((a) => ({
+          id: a.id,
+          name: a.name,
+          frames: a.frames.slice(),
+        })),
+      loadFromTimelineSnapshot: (arr) => {
+        const next = (Array.isArray(arr) ? arr : []).map((a) => ({
+          id: a.id || makeId(),
+          name: a.name || "untitled animation",
+          frames: Array.isArray(a.frames) ? a.frames.slice() : [],
+        }));
+        setAnims(next);
+
+        // recompute the untitled counter
+        const untitledNums = next
+          .map((a) => a.name?.match(/^untitled animation\s+(\d+)$/i)?.[1])
+          .filter(Boolean)
+          .map((s) => parseInt(s, 10))
+          .filter((n) => Number.isFinite(n));
+        setUntitledIdx(untitledNums.length ? Math.max(...untitledNums) + 1 : 1);
+      },
+    };
+    onExposeTimelineAPI(api);
+  }, [onExposeTimelineAPI]);
 
   useEffect(() => {
     if (editingId && inputRef.current) {
@@ -38,6 +111,15 @@ const TimelinePanel = ({
   useEffect(() => {
     if (!selectedAnimId && isPlaying) setIsPlaying(false);
   }, [selectedAnimId, isPlaying]);
+
+  // reset untitled counter when all blocks are removed
+  useEffect(() => {
+    if (anims.length === 0) {
+      setUntitledIdx(1);
+      setSelectedAnimId(null);
+      setSelection(null);
+    }
+  }, [anims.length]);
 
   // --- helper: compute occurrence index among equal numbers up to idx ---
   const occurrenceIndex = (frames, n, idx) => {
@@ -51,10 +133,12 @@ const TimelinePanel = ({
   // Global Delete to remove selected frame
   useEffect(() => {
     const onKey = (e) => {
-      // don't delete while editing a name
-      if (editingId) return;
+      // If a blocking prompt is open, ignore key events entirely
+      if (isPromptOpenRef.current) return;
 
+      if (editingId) return; // don't delete while editing a name
       if (!selection) return;
+
       if (e.key === "Delete" || e.key === "Backspace") {
         e.preventDefault();
         const { animId, frameNum, _idx } = selection;
@@ -62,7 +146,6 @@ const TimelinePanel = ({
           prev.map((a) => {
             if (a.id !== animId) return a;
             const cur = a.frames.slice();
-            // remove the specific occurrence index of this frame number
             let seen = -1;
             for (let i = 0; i < cur.length; i++) {
               if (cur[i] === frameNum) {
@@ -132,27 +215,45 @@ const TimelinePanel = ({
     setEditingText("");
   };
 
+  /**
+   * Prompt for a frame number and add it to the block if valid.
+   * Returns true if a frame was added, false otherwise.
+   */
   const promptAddFrame = (animId) => {
-    const raw = window.prompt("Enter frame number to add:");
-    if (raw === null) return;
-    const num = parseInt(String(raw).trim(), 10);
-    if (!Number.isFinite(num) || num < 1) return;
+    try {
+      isPromptOpenRef.current = true;
 
-    if (num > framesCount) {
-      onToast(
-        `There are only ${framesCount} frame${
-          framesCount === 1 ? "" : "s"
-        } in the rail.`
+      const raw = window.prompt("Enter frame number to add:");
+      if (raw === null) return false; // cancelled
+
+      const num = parseInt(String(raw).trim(), 10);
+      if (!Number.isFinite(num) || num < 1) {
+        onToast("Please enter a valid frame number (>= 1).");
+        return false;
+      }
+
+      const maxFrames = Number(framesCount) || 0;
+      if (num > maxFrames) {
+        onToast(
+          `There are only ${maxFrames} frame${
+            maxFrames === 1 ? "" : "s"
+          } in the rail.`
+        );
+        return false; // ✅ do nothing to state
+      }
+
+      // valid -> update only the target block
+      setAnims((prev) =>
+        prev.map((a) => {
+          if (a.id !== animId) return a;
+          return { ...a, frames: [...a.frames, num] };
+        })
       );
-      return;
+      return true;
+    } finally {
+      // release the prompt lock
+      isPromptOpenRef.current = false;
     }
-
-    setAnims((prev) =>
-      prev.map((a) => {
-        if (a.id !== animId) return a;
-        return { ...a, frames: [...a.frames, num] };
-      })
-    );
   };
 
   // Drag logic (reorder within the same animation)
@@ -161,7 +262,6 @@ const TimelinePanel = ({
     e.dataTransfer.setData("text/plain", `${anim.id}:${frameNum}`);
     e.dataTransfer.effectAllowed = "move";
 
-    // set selection using occurrence index
     const occIdx = occurrenceIndex(anim.frames, frameNum, idxInArray);
     setSelection({ animId: anim.id, frameNum, _idx: occIdx });
     setSelectedAnimId(anim.id);
@@ -370,8 +470,11 @@ const TimelinePanel = ({
                               className="px-1.5 py-0.5 text[11px] leading-none rounded-md border border-[#cfe0f1] hover:bg-[#eef6ff] whitespace-nowrap"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                promptAddFrame(anim.id);
-                                setSelectedAnimId(anim.id);
+                                // Don't preselect; only select after a successful add
+                                const added = promptAddFrame(anim.id);
+                                if (added) setSelectedAnimId(anim.id);
+                                // Clear selection to avoid any Delete key side effects
+                                setSelection(null);
                               }}
                               title="Add frame by number"
                             >

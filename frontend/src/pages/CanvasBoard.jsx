@@ -48,6 +48,14 @@ const CanvasBoard = () => {
   const animRailApiRef = useRef(null);
   const pendingAnimSnapshotRef = useRef(null);
 
+  // ===== Timeline bridge (NEW) =====
+  const timelineApiRef = useRef(null);
+  const [initialTimelineAnims, setInitialTimelineAnims] = useState(null); // applied when Timeline mounts
+  const memoInitialTimelineAnims = useMemo(
+    () => initialTimelineAnims || [],
+    [initialTimelineAnims]
+  );
+
   // Pixel canvas API (from PixelGridCanvas)
   const pixelApiRef = useRef({});
 
@@ -368,6 +376,9 @@ const CanvasBoard = () => {
       return setToastMsg("Nothing to save yet — draw something first.");
     }
 
+    // NEW: pull timeline blocks (animations) snapshot
+    const timeline = timelineApiRef.current?.collectTimelineSnapshot?.() || [];
+
     const method = projectId ? "PUT" : "POST";
     const url = projectId
       ? `/api/projects/animations/${projectId}?userId=${user.id}`
@@ -385,6 +396,12 @@ const CanvasBoard = () => {
         name: f.name,
         selectedLayerId: f.selectedLayerId ?? null,
         layers: f.layers,
+      })),
+      // NEW: timeline animations persisted
+      animations: timeline.map((a) => ({
+        id: a.id,
+        name: a.name,
+        frames: a.frames || [],
       })),
       previewPng: snap.previewPng || null,
       favorite: false,
@@ -510,6 +527,9 @@ const CanvasBoard = () => {
             previewPng: pa.previewPng || null,
           };
 
+          // NEW: timeline animations from backend
+          setInitialTimelineAnims(pa.animations || []);
+
           if (animRailApiRef.current?.loadFromAnimationSnapshot) {
             animRailApiRef.current.loadFromAnimationSnapshot(snapshot);
           } else {
@@ -582,7 +602,6 @@ const CanvasBoard = () => {
       : cvs.toDataURL("image/png");
   };
 
-  // ---- NEW: Draw a set of layers into an existing ctx at offset ----
   const renderLayersToCtx = (ctx, layersArr, w, h, dx, dy, scale, opaqueBG) => {
     if (opaqueBG) {
       ctx.fillStyle = "#ffffff";
@@ -604,13 +623,12 @@ const CanvasBoard = () => {
     }
   };
 
-  // ---- NEW: Build a sprite sheet from animation snapshot ----
   const renderSpriteSheetDataURL = (
-    animSnap, // from rail.collectAnimationSnapshot()
-    format = "png", // 'png' | 'jpeg'
+    animSnap,
+    format = "png",
     scale = 4,
     jpegQuality = 0.92,
-    maxPerRow = 10 // <= requirement
+    maxPerRow = 10
   ) => {
     if (!animSnap || !Array.isArray(animSnap.frames) || !animSnap.frames.length)
       return null;
@@ -665,7 +683,6 @@ const CanvasBoard = () => {
   };
 
   const handleExportPick = (fmt /* 'png' | 'jpeg' */) => {
-    // STATIC → single image
     if (mode === "static") {
       if (pixelApiRef.current?.isEmpty?.()) {
         setToastMsg("Nothing in the canvas to export.");
@@ -681,7 +698,6 @@ const CanvasBoard = () => {
       return;
     }
 
-    // ANIMATIONS → sprite sheet
     const rail = animRailApiRef.current;
     if (!rail?.collectAnimationSnapshot) {
       setToastMsg("Animation rail not ready.");
@@ -876,6 +892,16 @@ const CanvasBoard = () => {
         <TimelinePanel
           framesCount={framesCount}
           onToast={(msg) => setToastMsg(msg)}
+          // NEW: seed from backend when opening a saved animation
+          initialAnimations={memoInitialTimelineAnims}
+          // NEW: expose API so CanvasBoard can save the timeline blocks
+          onExposeTimelineAPI={(api) => {
+            timelineApiRef.current = api || null;
+            // if we had initial data, push it explicitly too (defensive)
+            if (api && initialTimelineAnims) {
+              api.loadFromTimelineSnapshot?.(initialTimelineAnims);
+            }
+          }}
         />
       )}
     </div>

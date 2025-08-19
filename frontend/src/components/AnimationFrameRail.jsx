@@ -21,6 +21,9 @@ const makeBlankFrame = (index = 0) => {
   };
 };
 
+// Deep clone layers meta
+const cloneLayersMeta = (layers) => JSON.parse(JSON.stringify(layers));
+
 const AnimationFrameRail = ({
   width = 16,
   height = 16,
@@ -37,7 +40,7 @@ const AnimationFrameRail = ({
   onExposeLayerAPI,
   onFramesCountChange,
 
-  // parent can grab a rail-level API (collect & load)
+  // parent can grab a rail-level API (collect, load, undo/redo)
   onExposeRailAPI,
 }) => {
   const [frames, setFrames] = useState([makeBlankFrame(0)]);
@@ -62,6 +65,64 @@ const AnimationFrameRail = ({
 
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
+  // ------- Undo/Redo stacks for ANIMATION mode -------
+  const undoRef = useRef([]); // entries: { type: 'pixels'|'layers', frameId, diffs? , before?/after? , selectedBefore?/selectedAfter? }
+  const redoRef = useRef([]);
+
+  const pushHistory = (entry) => {
+    undoRef.current.push(entry);
+    if (undoRef.current.length > 200) undoRef.current.shift();
+    redoRef.current = [];
+  };
+
+  const applyEntry = (entry, direction /* 'undo'|'redo' */) => {
+    if (entry.type === "pixels") {
+      const api = frameApisRef.current.get(entry.frameId);
+      if (!api) return;
+      if (direction === "undo") api.undoPixelDiffs?.(entry.diffs);
+      else api.applyPixelDiffs?.(entry.diffs);
+      return;
+    }
+    if (entry.type === "layers") {
+      setFrames((prev) => {
+        const idx = prev.findIndex((f) => f.id === entry.frameId);
+        if (idx === -1) return prev;
+        const next = prev.slice();
+        const f = next[idx];
+        const payload =
+          direction === "undo"
+            ? {
+                layers: cloneLayersMeta(entry.before),
+                activeLayerId: entry.selectedBefore ?? null,
+              }
+            : {
+                layers: cloneLayersMeta(entry.after),
+                activeLayerId: entry.selectedAfter ?? null,
+              };
+        next[idx] = { ...f, ...payload };
+        return next;
+      });
+      return;
+    }
+  };
+
+  const undo = () => {
+    const entry = undoRef.current.pop();
+    if (!entry) return;
+    applyEntry(entry, "undo");
+    redoRef.current.push(entry);
+  };
+
+  const redo = () => {
+    const entry = redoRef.current.pop();
+    if (!entry) return;
+    applyEntry(entry, "redo");
+    undoRef.current.push(entry);
+  };
+
+  const canUndo = () => undoRef.current.length > 0;
+  const canRedo = () => redoRef.current.length > 0;
+
   // ------- Notify parent about active frame meta -------
   useEffect(() => {
     const f = frames[activeIndex];
@@ -78,26 +139,48 @@ const AnimationFrameRail = ({
     onFramesCountChange?.(frames.length);
   }, [frames.length, onFramesCountChange]);
 
-  // ------- Layer API exposed to parent -------
+  // ------- Layer API exposed to parent (with history) -------
   useEffect(() => {
     const getActiveFrame = (arr) => arr[activeIndexRef.current];
 
+    const withLayerHistory = (mutator) => {
+      setFrames((prev) => {
+        const idx = activeIndexRef.current;
+        const f = prev[idx];
+        if (!f) return prev;
+
+        const beforeLayers = cloneLayersMeta(f.layers);
+        const beforeSel = f.activeLayerId ?? null;
+
+        const next = prev.slice();
+        const mutated = mutator({ ...f });
+        next[idx] = mutated;
+
+        const afterLayers = cloneLayersMeta(mutated.layers);
+        const afterSel = mutated.activeLayerId ?? null;
+
+        pushHistory({
+          type: "layers",
+          frameId: f.id,
+          before: beforeLayers,
+          after: afterLayers,
+          selectedBefore: beforeSel,
+          selectedAfter: afterSel,
+        });
+
+        return next;
+      });
+    };
+
     const api = {
       selectLayer: (id) => {
-        setFrames((prev) => {
-          const next = prev.slice();
-          const f = getActiveFrame(next);
-          if (!f) return prev;
-          if (f.activeLayerId === id) return prev;
-          next[activeIndexRef.current] = { ...f, activeLayerId: id };
-          return next;
+        withLayerHistory((f) => {
+          if (f.activeLayerId === id) return f;
+          return { ...f, activeLayerId: id };
         });
       },
       addLayer: () => {
-        setFrames((prev) => {
-          const next = prev.slice();
-          const f = getActiveFrame(next);
-          if (!f) return prev;
+        withLayerHistory((f) => {
           const id = makeId("layer");
           const newLayer = {
             id,
@@ -105,70 +188,47 @@ const AnimationFrameRail = ({
             visible: true,
             locked: false,
           };
-          next[activeIndexRef.current] = {
+          return {
             ...f,
             layers: [newLayer, ...f.layers],
             activeLayerId: id,
           };
-          return next;
         });
       },
       toggleVisible: (id) => {
-        setFrames((prev) => {
-          const next = prev.slice();
-          const f = getActiveFrame(next);
-          if (!f) return prev;
-          next[activeIndexRef.current] = {
-            ...f,
-            layers: f.layers.map((l) =>
-              l.id === id ? { ...l, visible: !l.visible } : l
-            ),
-          };
-          return next;
-        });
+        withLayerHistory((f) => ({
+          ...f,
+          layers: f.layers.map((l) =>
+            l.id === id ? { ...l, visible: !l.visible } : l
+          ),
+        }));
       },
       toggleLocked: (id) => {
-        setFrames((prev) => {
-          const next = prev.slice();
-          const f = getActiveFrame(next);
-          if (!f) return prev;
-          next[activeIndexRef.current] = {
-            ...f,
-            layers: f.layers.map((l) =>
-              l.id === id ? { ...l, locked: !l.locked } : l
-            ),
-          };
-          return next;
-        });
+        withLayerHistory((f) => ({
+          ...f,
+          layers: f.layers.map((l) =>
+            l.id === id ? { ...l, locked: !l.locked } : l
+          ),
+        }));
       },
       renameLayer: (id, newName) => {
-        setFrames((prev) => {
-          const next = prev.slice();
-          const f = getActiveFrame(next);
-          if (!f) return prev;
-          next[activeIndexRef.current] = {
-            ...f,
-            layers: f.layers.map((l) =>
-              l.id === id ? { ...l, name: newName } : l
-            ),
-          };
-          return next;
-        });
+        withLayerHistory((f) => ({
+          ...f,
+          layers: f.layers.map((l) =>
+            l.id === id ? { ...l, name: newName } : l
+          ),
+        }));
       },
       deleteLayer: (id) => {
-        setFrames((prev) => {
-          const next = prev.slice();
-          const f = getActiveFrame(next);
-          if (!f) return prev;
+        withLayerHistory((f) => {
           const after = f.layers.filter((l) => l.id !== id);
           const nextActive =
             f.activeLayerId === id ? after[0]?.id ?? null : f.activeLayerId;
-          next[activeIndexRef.current] = {
+          return {
             ...f,
             layers: after,
             activeLayerId: nextActive,
           };
-          return next;
         });
       },
     };
@@ -176,7 +236,7 @@ const AnimationFrameRail = ({
     onExposeLayerAPI?.(api);
   }, [onExposeLayerAPI]);
 
-  // ------- Rail-level API: collect & load -------
+  // ------- Rail-level API: collect, load, undo/redo -------
   useEffect(() => {
     if (!onExposeRailAPI) return;
     const api = {
@@ -202,7 +262,6 @@ const AnimationFrameRail = ({
           frames: framesArr,
         };
       },
-      // Load full animation snapshot from backend
       loadFromAnimationSnapshot: (snapshot) => {
         const safeFrames = (snapshot?.frames || []).map((f, i) => ({
           id: f.id || makeId("frame"),
@@ -224,19 +283,24 @@ const AnimationFrameRail = ({
         }));
 
         setFrames(safeFrames.length ? safeFrames : [makeBlankFrame(0)]);
-        // Make the last frame active so subsequent "Add Frame" feels natural
         setActiveIndex(Math.max(0, (safeFrames.length || 1) - 1));
+        // clear stacks on load
+        undoRef.current = [];
+        redoRef.current = [];
       },
+      undo,
+      redo,
+      canUndo,
+      canRedo,
     };
     onExposeRailAPI(api);
   }, [onExposeRailAPI, frames, width, height]);
 
   // ------- Add frame helpers -------
-  // Insert AFTER a given base index (used when you want to add near active)
-  const addFrameAfterIndex = (baseIndexProducer) => {
+  const addFrameAtEnd = () => {
     setFrames((prev) => {
-      const baseIndex = baseIndexProducer(prev);
-      const curr = prev[baseIndex] ?? prev[prev.length - 1];
+      // new frame uses previous frame's snapshot as seed for pixels (not needed for history)
+      const curr = prev[prev.length - 1];
       const prevApi = frameApisRef.current.get(curr.id);
       const seed = prevApi?.makeSnapshot?.() || null;
 
@@ -260,26 +324,12 @@ const AnimationFrameRail = ({
         seedSnapshot: seed,
       };
 
-      const next = prev.slice();
-      next.splice(baseIndex + 1, 0, newFrame);
+      const next = prev.concat(newFrame);
       return next;
     });
-
-    // Select the newly inserted frame when appending at the end;
-    // when inserting after active, we'll advance by one.
-    const isAppend = baseIndexProducer === ((arr) => arr.length - 1);
-    if (isAppend) {
-      setActiveIndex((i) => i + 1);
-    } else {
-      setActiveIndex((i) => (i === activeIndexRef.current ? i + 1 : i));
-    }
+    setActiveIndex((i) => i + 1);
+    // Stacks remain unchanged (adding/removing frames isn't part of pixel/layer history for now)
   };
-
-  // Public actions bound to UI
-  const addFrameAfterActive = () =>
-    addFrameAfterIndex(() => activeIndexRef.current);
-
-  const addFrameAtEnd = () => addFrameAfterIndex((arr) => arr.length - 1);
 
   const removeFrame = (frameId) => {
     setFrames((prev) => {
@@ -437,7 +487,6 @@ const AnimationFrameRail = ({
                 </button>
               </div>
 
-              {/* Canvas area is marked interactive so viewport doesn't hijack its wheel */}
               <div
                 className="min-w-[300px] min-h-[300px]"
                 data-canvas-interactive="true"
@@ -453,7 +502,20 @@ const AnimationFrameRail = ({
                     onRequireLayer(`[${frame.name}] ${msg}`)
                   }
                   onPickColor={(hex) => onPickColor(hex)}
-                  onPushHistory={() => {}}
+                  // Capture pixel history and add frameId
+                  onPushHistory={(entry) => {
+                    if (
+                      !entry ||
+                      entry.type !== "pixels" ||
+                      !entry.diffs?.length
+                    )
+                      return;
+                    pushHistory({
+                      type: "pixels",
+                      frameId: frame.id,
+                      diffs: entry.diffs,
+                    });
+                  }}
                   onRegisterPixelAPI={(api) => {
                     frameApisRef.current.set(frame.id, api);
                     if (frame.seedSnapshot) {
@@ -473,7 +535,7 @@ const AnimationFrameRail = ({
             </div>
           ))}
 
-          {/* Add frame card (ALWAYS append to the end now) */}
+          {/* Add frame card (append to the end) */}
           <button
             onClick={addFrameAtEnd}
             className="flex flex-col items-center justify-center min-w-[120px] min-h-[120px] h-full rounded-2xl border-2 border-dashed border-[#9ec3e6] text-[#4D9FDC] hover:bg-white/60 hover:border-[#4D9FDC] transition"

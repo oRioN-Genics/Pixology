@@ -9,7 +9,7 @@ const AnimationPixelGridCanvas = ({
   layers = [],
   onRequireLayer,
   onPickColor,
-  onPushHistory,
+  onPushHistory, // <-- Rail captures this and wraps to inject frameId
   onRegisterPixelAPI,
 }) => {
   const cellSize = 30;
@@ -287,7 +287,7 @@ const AnimationPixelGridCanvas = ({
 
     if (currentStroke.current && currentStroke.current.size > 0) {
       const diffs = Array.from(currentStroke.current.values());
-      onPushHistory?.({ type: "pixels", diffs });
+      onPushHistory?.({ type: "pixels", diffs }); // <- rail will wrap and add frameId
       currentStroke.current = null;
     }
     document.body.style.cursor = "default";

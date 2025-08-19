@@ -48,10 +48,10 @@ const CanvasBoard = () => {
   const animRailApiRef = useRef(null);
   const pendingAnimSnapshotRef = useRef(null);
 
-  // ===== Timeline bridge (NEW) =====
+  // ===== Timeline bridge =====
   const timelineApiRef = useRef(null);
   const timelineSeededRef = useRef(false);
-  const [initialTimelineAnims, setInitialTimelineAnims] = useState(null); // applied when Timeline mounts
+  const [initialTimelineAnims, setInitialTimelineAnims] = useState(null);
   const memoInitialTimelineAnims = useMemo(
     () => initialTimelineAnims || [],
     [initialTimelineAnims]
@@ -60,7 +60,7 @@ const CanvasBoard = () => {
   // Pixel canvas API (from PixelGridCanvas)
   const pixelApiRef = useRef({});
 
-  // ----- Unified History -----
+  // ----- Static-mode history -----
   const undoStack = useRef([]);
   const redoStack = useRef([]);
 
@@ -70,7 +70,7 @@ const CanvasBoard = () => {
     redoStack.current = [];
   };
 
-  const doUndo = () => {
+  const doUndoStatic = () => {
     const entry = undoStack.current.pop();
     if (!entry) return;
     if (entry.type === "pixels") {
@@ -82,7 +82,7 @@ const CanvasBoard = () => {
     redoStack.current.push(entry);
   };
 
-  const doRedo = () => {
+  const doRedoStatic = () => {
     const entry = redoStack.current.pop();
     if (!entry) return;
     if (entry.type === "pixels") {
@@ -111,8 +111,13 @@ const CanvasBoard = () => {
   const handleToolClick = (id) => {
     if (id === "undo" || id === "redo") {
       if (mode === "static") {
-        return id === "undo" ? void doUndo() : void doRedo();
+        return id === "undo" ? void doUndoStatic() : void doRedoStatic();
       }
+      // animations mode -> call rail
+      const rail = animRailApiRef.current;
+      if (!rail) return;
+      if (id === "undo") rail.undo?.();
+      else rail.redo?.();
       return;
     }
     setSelectedTool(id);
@@ -123,20 +128,26 @@ const CanvasBoard = () => {
     }
   };
 
-  // Shortcuts (limit to static mode for now)
+  // Shortcuts: support BOTH modes (static & animations)
   useEffect(() => {
     const handler = (e) => {
-      if (mode !== "static") return;
       const key = e.key.toLowerCase();
       const ctrlOrCmd = e.ctrlKey || e.metaKey;
       if (!ctrlOrCmd) return;
 
+      // Undo
       if (key === "z" && !e.shiftKey) {
         e.preventDefault();
-        doUndo();
-      } else if (key === "y" || (key === "z" && e.shiftKey)) {
+        if (mode === "static") doUndoStatic();
+        else animRailApiRef.current?.undo?.();
+        return;
+      }
+
+      // Redo
+      if (key === "y" || (key === "z" && e.shiftKey)) {
         e.preventDefault();
-        doRedo();
+        if (mode === "static") doRedoStatic();
+        else animRailApiRef.current?.redo?.();
       }
     };
     window.addEventListener("keydown", handler);
@@ -246,7 +257,7 @@ const CanvasBoard = () => {
   // From canvas: pixel history
   const handlePushHistoryFromCanvas = (entry) => pushHistory(entry);
 
-  // ---------- SAVE (POST then PUT) ----------
+  // ---------- SAVE (unchanged) ----------
   const getUser = () => {
     try {
       return JSON.parse(localStorage.getItem("pixology:user") || "null");
@@ -377,7 +388,7 @@ const CanvasBoard = () => {
       return setToastMsg("Nothing to save yet — draw something first.");
     }
 
-    // NEW: pull timeline blocks (animations) snapshot
+    // timeline blocks snapshot
     const timeline = timelineApiRef.current?.collectTimelineSnapshot?.() || [];
 
     const method = projectId ? "PUT" : "POST";
@@ -398,7 +409,6 @@ const CanvasBoard = () => {
         selectedLayerId: f.selectedLayerId ?? null,
         layers: f.layers,
       })),
-      // NEW: timeline animations persisted
       animations: timeline.map((a) => ({
         id: a.id,
         name: a.name,
@@ -528,7 +538,7 @@ const CanvasBoard = () => {
             previewPng: pa.previewPng || null,
           };
 
-          // NEW: timeline animations from backend
+          // timeline animations from backend
           setInitialTimelineAnims(pa.animations || []);
 
           if (animRailApiRef.current?.loadFromAnimationSnapshot) {
@@ -561,7 +571,7 @@ const CanvasBoard = () => {
     }
   };
 
-  // ---------- EXPORT (common helpers) ----------
+  // ---------- EXPORT (unchanged) ----------
   const renderSnapshotToDataURL = (
     snapshot,
     format = "png",
@@ -862,7 +872,9 @@ const CanvasBoard = () => {
                     animLayerApiRef.current = api || null;
                   }}
                   onFramesCountChange={(n) => setFramesCount(n)}
-                  onExposeRailAPI={handleExposeRailAPI}
+                  onExposeRailAPI={(api) => {
+                    handleExposeRailAPI(api);
+                  }}
                 />
               </div>
             )}
@@ -893,12 +905,9 @@ const CanvasBoard = () => {
         <TimelinePanel
           framesCount={framesCount}
           onToast={(msg) => setToastMsg(msg)}
-          // NEW: seed from backend when opening a saved animation
           initialAnimations={memoInitialTimelineAnims}
-          // NEW: expose API so CanvasBoard can save the timeline blocks
           onExposeTimelineAPI={(api) => {
             timelineApiRef.current = api || null;
-            // if we had initial data, push it explicitly too (defensive)
             if (
               api &&
               !timelineSeededRef.current &&

@@ -46,7 +46,7 @@ const CanvasBoard = () => {
   const [animSelectedLayerId, setAnimSelectedLayerId] = useState(null);
   const animLayerApiRef = useRef(null);
   const animRailApiRef = useRef(null);
-  const pendingAnimSnapshotRef = useRef(null); // NEW: buffer until rail API ready
+  const pendingAnimSnapshotRef = useRef(null);
 
   // Pixel canvas API (from PixelGridCanvas)
   const pixelApiRef = useRef({});
@@ -334,7 +334,7 @@ const CanvasBoard = () => {
     setToastMsg("Too many attempts. Please try a different name.");
   };
 
-  // ---- Animation save ----
+  // ---- Animation save helpers ----
   const anyPixelsInFrames = (frames = []) => {
     for (const f of frames) {
       for (const l of f.layers || []) {
@@ -441,7 +441,7 @@ const CanvasBoard = () => {
     setToastMsg("Too many attempts. Please try a different name.");
   };
 
-  // ---------- LOAD EXISTING PROJECT (try static, then animation) ----------
+  // ---------- LOAD EXISTING PROJECT ----------
   useEffect(() => {
     const user = getUser();
     if (!user || !projectId) return;
@@ -498,7 +498,6 @@ const CanvasBoard = () => {
           setWidth(pa.width);
           setHeight(pa.height);
 
-          // If rail API is not ready yet, buffer the snapshot and apply later.
           const snapshot = {
             width: pa.width,
             height: pa.height,
@@ -541,7 +540,7 @@ const CanvasBoard = () => {
     }
   };
 
-  // ---------- EXPORT ----------
+  // ---------- EXPORT (common helpers) ----------
   const renderSnapshotToDataURL = (
     snapshot,
     format = "png",
@@ -562,7 +561,7 @@ const CanvasBoard = () => {
       ctx.fillRect(0, 0, cvs.width, cvs.height);
     }
 
-    // Draw bottom -> top (stored order is top-first)
+    // bottom -> top (stored order is top-first)
     const ordered = [...layersArr].reverse();
     for (const ly of ordered) {
       if (ly.visible === false) continue;
@@ -583,7 +582,74 @@ const CanvasBoard = () => {
       : cvs.toDataURL("image/png");
   };
 
-  const triggerDownload = (dataUrl, fmt) => {
+  // ---- NEW: Draw a set of layers into an existing ctx at offset ----
+  const renderLayersToCtx = (ctx, layersArr, w, h, dx, dy, scale, opaqueBG) => {
+    if (opaqueBG) {
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(dx, dy, w * scale, h * scale);
+    }
+    const ordered = [...(layersArr || [])].reverse();
+    for (const ly of ordered) {
+      if (ly.visible === false) continue;
+      const px = ly.pixels || [];
+      for (let r = 0; r < h; r++) {
+        const row = px[r] || [];
+        for (let c = 0; c < w; c++) {
+          const hex = row[c];
+          if (!hex) continue;
+          ctx.fillStyle = hex;
+          ctx.fillRect(dx + c * scale, dy + r * scale, scale, scale);
+        }
+      }
+    }
+  };
+
+  // ---- NEW: Build a sprite sheet from animation snapshot ----
+  const renderSpriteSheetDataURL = (
+    animSnap, // from rail.collectAnimationSnapshot()
+    format = "png", // 'png' | 'jpeg'
+    scale = 4,
+    jpegQuality = 0.92,
+    maxPerRow = 10 // <= requirement
+  ) => {
+    if (!animSnap || !Array.isArray(animSnap.frames) || !animSnap.frames.length)
+      return null;
+
+    const w = animSnap.width;
+    const h = animSnap.height;
+    const frames = animSnap.frames;
+
+    const cols = Math.min(maxPerRow, frames.length);
+    const rows = Math.ceil(frames.length / cols);
+
+    const sheetW = cols * w * scale;
+    const sheetH = rows * h * scale;
+
+    const cvs = document.createElement("canvas");
+    cvs.width = sheetW;
+    cvs.height = sheetH;
+    const ctx = cvs.getContext("2d");
+
+    const opaqueBG = format === "jpeg";
+    if (opaqueBG) {
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, sheetW, sheetH);
+    }
+
+    frames.forEach((f, i) => {
+      const c = i % cols;
+      const r = Math.floor(i / cols);
+      const dx = c * w * scale;
+      const dy = r * h * scale;
+      renderLayersToCtx(ctx, f.layers, w, h, dx, dy, scale, false);
+    });
+
+    return format === "jpeg"
+      ? cvs.toDataURL("image/jpeg", jpegQuality)
+      : cvs.toDataURL("image/png");
+  };
+
+  const triggerDownload = (dataUrl, fmt, extra = "") => {
     if (!dataUrl) return setToastMsg("Failed to export image.");
     const safeName =
       (projectName || "pixology").replace(/[^\w.-]+/g, "_").slice(0, 60) ||
@@ -592,28 +658,49 @@ const CanvasBoard = () => {
 
     const a = document.createElement("a");
     a.href = dataUrl;
-    a.download = `${safeName}_${width}x${height}.${ext}`;
+    a.download = `${safeName}_${width}x${height}${extra}.${ext}`;
     document.body.appendChild(a);
     a.click();
     a.remove();
   };
 
   const handleExportPick = (fmt /* 'png' | 'jpeg' */) => {
-    if (mode === "animations") {
-      setToastMsg("Export for animations will be added soon.");
+    // STATIC → single image
+    if (mode === "static") {
+      if (pixelApiRef.current?.isEmpty?.()) {
+        setToastMsg("Nothing in the canvas to export.");
+        return;
+      }
+      const snapshot = pixelApiRef.current?.makeSnapshot?.();
+      if (!snapshot) {
+        setToastMsg("Could not read canvas state.");
+        return;
+      }
+      const dataUrl = renderSnapshotToDataURL(snapshot, fmt, 4, 0.92);
+      triggerDownload(dataUrl, fmt);
       return;
     }
-    if (pixelApiRef.current?.isEmpty?.()) {
-      setToastMsg("Nothing in the canvas to export.");
+
+    // ANIMATIONS → sprite sheet
+    const rail = animRailApiRef.current;
+    if (!rail?.collectAnimationSnapshot) {
+      setToastMsg("Animation rail not ready.");
       return;
     }
-    const snapshot = pixelApiRef.current?.makeSnapshot?.();
-    if (!snapshot) {
-      setToastMsg("Could not read canvas state.");
+    const animSnap = rail.collectAnimationSnapshot();
+    if (!animSnap?.frames?.length) {
+      setToastMsg("No frames to export.");
       return;
     }
-    const dataUrl = renderSnapshotToDataURL(snapshot, fmt, 4, 0.92);
-    triggerDownload(dataUrl, fmt);
+    if (!anyPixelsInFrames(animSnap.frames)) {
+      setToastMsg("Nothing to export — draw something first.");
+      return;
+    }
+
+    const cols = Math.min(10, animSnap.frames.length);
+    const rows = Math.ceil(animSnap.frames.length / cols);
+    const dataUrl = renderSpriteSheetDataURL(animSnap, fmt, 4, 0.92, 10);
+    triggerDownload(dataUrl, fmt, `_spritesheet_${cols}x${rows}`);
   };
 
   return (
@@ -633,8 +720,16 @@ const CanvasBoard = () => {
             saveProject();
           }}
           onBeforeExportClick={() => {
-            if (mode === "animations")
-              return "Export for animations will be added soon.";
+            if (mode === "animations") {
+              const rail = animRailApiRef.current;
+              if (!rail?.collectAnimationSnapshot)
+                return "Animation rail not ready.";
+              const animSnap = rail.collectAnimationSnapshot();
+              if (!animSnap?.frames?.length) return "No frames to export.";
+              if (!anyPixelsInFrames(animSnap.frames))
+                return "Nothing to export — draw something first.";
+              return true; // allow popover for PNG/JPG
+            }
             if (pixelApiRef.current?.isEmpty?.())
               return "Nothing in the canvas to export.";
             return true; // allow popover

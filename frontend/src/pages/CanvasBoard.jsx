@@ -50,6 +50,7 @@ const CanvasBoard = () => {
 
   // ===== Timeline bridge (NEW) =====
   const timelineApiRef = useRef(null);
+  const timelineSeededRef = useRef(false);
   const [initialTimelineAnims, setInitialTimelineAnims] = useState(null); // applied when Timeline mounts
   const memoInitialTimelineAnims = useMemo(
     () => initialTimelineAnims || [],
@@ -898,8 +899,13 @@ const CanvasBoard = () => {
           onExposeTimelineAPI={(api) => {
             timelineApiRef.current = api || null;
             // if we had initial data, push it explicitly too (defensive)
-            if (api && initialTimelineAnims) {
+            if (
+              api &&
+              !timelineSeededRef.current &&
+              Array.isArray(initialTimelineAnims)
+            ) {
               api.loadFromTimelineSnapshot?.(initialTimelineAnims);
+              timelineSeededRef.current = true;
             }
           }}
         />

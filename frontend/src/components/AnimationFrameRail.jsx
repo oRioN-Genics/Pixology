@@ -202,6 +202,7 @@ const AnimationFrameRail = ({
           frames: framesArr,
         };
       },
+      // Load full animation snapshot from backend
       loadFromAnimationSnapshot: (snapshot) => {
         const safeFrames = (snapshot?.frames || []).map((f, i) => ({
           id: f.id || makeId("frame"),
@@ -223,16 +224,19 @@ const AnimationFrameRail = ({
         }));
 
         setFrames(safeFrames.length ? safeFrames : [makeBlankFrame(0)]);
-        setActiveIndex(0);
+        // Make the last frame active so subsequent "Add Frame" feels natural
+        setActiveIndex(Math.max(0, (safeFrames.length || 1) - 1));
       },
     };
     onExposeRailAPI(api);
   }, [onExposeRailAPI, frames, width, height]);
 
-  // ------- Frame ops -------
-  const addFrameRight = () => {
+  // ------- Add frame helpers -------
+  // Insert AFTER a given base index (used when you want to add near active)
+  const addFrameAfterIndex = (baseIndexProducer) => {
     setFrames((prev) => {
-      const curr = prev[activeIndex];
+      const baseIndex = baseIndexProducer(prev);
+      const curr = prev[baseIndex] ?? prev[prev.length - 1];
       const prevApi = frameApisRef.current.get(curr.id);
       const seed = prevApi?.makeSnapshot?.() || null;
 
@@ -257,16 +261,29 @@ const AnimationFrameRail = ({
       };
 
       const next = prev.slice();
-      next.splice(activeIndex + 1, 0, newFrame);
+      next.splice(baseIndex + 1, 0, newFrame);
       return next;
     });
 
-    setActiveIndex((i) => i + 1);
+    // Select the newly inserted frame when appending at the end;
+    // when inserting after active, we'll advance by one.
+    const isAppend = baseIndexProducer === ((arr) => arr.length - 1);
+    if (isAppend) {
+      setActiveIndex((i) => i + 1);
+    } else {
+      setActiveIndex((i) => (i === activeIndexRef.current ? i + 1 : i));
+    }
   };
+
+  // Public actions bound to UI
+  const addFrameAfterActive = () =>
+    addFrameAfterIndex(() => activeIndexRef.current);
+
+  const addFrameAtEnd = () => addFrameAfterIndex((arr) => arr.length - 1);
 
   const removeFrame = (frameId) => {
     setFrames((prev) => {
-      if (prev.length <= 1) return prev;
+      if (prev.length <= 1) return prev; // keep at least one
       const idx = prev.findIndex((f) => f.id === frameId);
       const next = prev.filter((f) => f.id !== frameId);
 
@@ -287,19 +304,19 @@ const AnimationFrameRail = ({
     if (!vp) return;
 
     const onMouseDown = (e) => {
-      if (e.button !== 1) return;
+      if (e.button !== 1) return; // middle
       const onCanvas = e.target.closest("[data-canvas-interactive='true']");
       if (onCanvas) return;
       e.preventDefault();
       e.stopPropagation();
       isPanningRef.current = true;
-      document.body.style.cursor = "grabbing";
       panStartRef.current = {
         x: e.clientX,
         y: e.clientY,
         tx: translate.x,
         ty: translate.y,
       };
+      document.body.style.cursor = "grabbing";
     };
 
     const onMouseMove = (e) => {
@@ -344,10 +361,11 @@ const AnimationFrameRail = ({
       const mouseY = e.clientY - rect.top;
 
       const oldScale = scale;
-      const dir = e.deltaY < 0 ? 1 : -1;
-      const newScale = Math.min(
-        maxScale,
-        Math.max(minScale, +(oldScale + dir * zoomStep).toFixed(3))
+      const dir = e.deltaY < 0 ? 1 : -1; // up=in, down=out
+      const newScale = clamp(
+        +(oldScale + dir * zoomStep).toFixed(3),
+        minScale,
+        maxScale
       );
       if (newScale === oldScale) return;
 
@@ -419,7 +437,7 @@ const AnimationFrameRail = ({
                 </button>
               </div>
 
-              {/* Canvas area */}
+              {/* Canvas area is marked interactive so viewport doesn't hijack its wheel */}
               <div
                 className="min-w-[300px] min-h-[300px]"
                 data-canvas-interactive="true"
@@ -440,6 +458,7 @@ const AnimationFrameRail = ({
                     frameApisRef.current.set(frame.id, api);
                     if (frame.seedSnapshot) {
                       api.loadFromSnapshot?.(frame.seedSnapshot);
+                      // clear seed once applied
                       setFrames((prev) => {
                         const i = prev.findIndex((f) => f.id === frame.id);
                         if (i === -1) return prev;
@@ -454,11 +473,11 @@ const AnimationFrameRail = ({
             </div>
           ))}
 
-          {/* Add frame card */}
+          {/* Add frame card (ALWAYS append to the end now) */}
           <button
-            onClick={addFrameRight}
+            onClick={addFrameAtEnd}
             className="flex flex-col items-center justify-center min-w-[120px] min-h-[120px] h-full rounded-2xl border-2 border-dashed border-[#9ec3e6] text-[#4D9FDC] hover:bg-white/60 hover:border-[#4D9FDC] transition"
-            title="Add a new frame to the right"
+            title="Add a new frame at the end"
           >
             <div className="text-2xl leading-none">＋</div>
             <div className="text-sm mt-1">Add Frame</div>

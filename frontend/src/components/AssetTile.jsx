@@ -29,8 +29,9 @@ const AssetTile = ({
   };
 
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       title={name}
       onClick={() => onClick?.(id)}
       onDoubleClick={() => onDoubleClick?.(id)}
@@ -38,9 +39,12 @@ const AssetTile = ({
         e.preventDefault();
         onContextMenu?.(id, e);
       }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") onDoubleClick?.(id);
+      }}
       className={[
         "group w-[200px] select-none text-left focus:outline-none",
-        "transition-transform duration-200",
+        "transition-transform duration-200 cursor-pointer",
         selected ? "translate-y-0" : "hover:-translate-y-[2px]",
       ].join(" ")}
     >
@@ -150,7 +154,7 @@ const AssetTile = ({
       >
         {name}
       </div>
-    </button>
+    </div>
   );
 };
 

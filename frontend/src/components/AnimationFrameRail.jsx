@@ -36,6 +36,9 @@ const AnimationFrameRail = ({
   onActiveFrameMeta,
   onExposeLayerAPI,
   onFramesCountChange,
+
+  // parent can grab a rail-level API (collect & load)
+  onExposeRailAPI,
 }) => {
   const [frames, setFrames] = useState([makeBlankFrame(0)]);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -70,7 +73,7 @@ const AnimationFrameRail = ({
     });
   }, [frames, activeIndex, onActiveFrameMeta]);
 
-  // Report frames count to parent for the timeline's validation
+  // Report frames count to parent
   useEffect(() => {
     onFramesCountChange?.(frames.length);
   }, [frames.length, onFramesCountChange]);
@@ -173,7 +176,60 @@ const AnimationFrameRail = ({
     onExposeLayerAPI?.(api);
   }, [onExposeLayerAPI]);
 
-  // ------- Frame ops (duplicate drawings on add) -------
+  // ------- Rail-level API: collect & load -------
+  useEffect(() => {
+    if (!onExposeRailAPI) return;
+    const api = {
+      collectAnimationSnapshot: () => {
+        const framesArr = frames.map((f) => {
+          const api = frameApisRef.current.get(f.id);
+          const snap = api?.makeSnapshot?.();
+          return {
+            id: f.id,
+            name: f.name,
+            selectedLayerId: snap?.selectedLayerId ?? f.activeLayerId ?? null,
+            layers: snap?.layers ?? [],
+            previewPng: snap?.previewPng ?? null,
+          };
+        });
+        const projectPreview = framesArr[0]?.previewPng || null;
+        return {
+          width,
+          height,
+          fps: 12,
+          frameCount: framesArr.length,
+          previewPng: projectPreview,
+          frames: framesArr,
+        };
+      },
+      loadFromAnimationSnapshot: (snapshot) => {
+        const safeFrames = (snapshot?.frames || []).map((f, i) => ({
+          id: f.id || makeId("frame"),
+          name: f.name || `Frame ${i + 1}`,
+          layers: (f.layers || []).map((l) => ({
+            id: l.id,
+            name: l.name,
+            visible: !!l.visible,
+            locked: !!l.locked,
+          })) || [newDefaultLayer()],
+          activeLayerId: f.selectedLayerId ?? f.layers?.[0]?.id ?? null,
+          seedSnapshot: {
+            width: snapshot.width,
+            height: snapshot.height,
+            selectedLayerId: f.selectedLayerId ?? f.layers?.[0]?.id ?? null,
+            layers: f.layers || [],
+            previewPng: f.previewPng || null,
+          },
+        }));
+
+        setFrames(safeFrames.length ? safeFrames : [makeBlankFrame(0)]);
+        setActiveIndex(0);
+      },
+    };
+    onExposeRailAPI(api);
+  }, [onExposeRailAPI, frames, width, height]);
+
+  // ------- Frame ops -------
   const addFrameRight = () => {
     setFrames((prev) => {
       const curr = prev[activeIndex];
@@ -210,7 +266,7 @@ const AnimationFrameRail = ({
 
   const removeFrame = (frameId) => {
     setFrames((prev) => {
-      if (prev.length <= 1) return prev; // keep at least one
+      if (prev.length <= 1) return prev;
       const idx = prev.findIndex((f) => f.id === frameId);
       const next = prev.filter((f) => f.id !== frameId);
 
@@ -231,19 +287,19 @@ const AnimationFrameRail = ({
     if (!vp) return;
 
     const onMouseDown = (e) => {
-      if (e.button !== 1) return; // middle
+      if (e.button !== 1) return;
       const onCanvas = e.target.closest("[data-canvas-interactive='true']");
       if (onCanvas) return;
       e.preventDefault();
       e.stopPropagation();
       isPanningRef.current = true;
+      document.body.style.cursor = "grabbing";
       panStartRef.current = {
         x: e.clientX,
         y: e.clientY,
         tx: translate.x,
         ty: translate.y,
       };
-      document.body.style.cursor = "grabbing";
     };
 
     const onMouseMove = (e) => {
@@ -288,11 +344,10 @@ const AnimationFrameRail = ({
       const mouseY = e.clientY - rect.top;
 
       const oldScale = scale;
-      const dir = e.deltaY < 0 ? 1 : -1; // up=in, down=out
-      const newScale = clamp(
-        +(oldScale + dir * zoomStep).toFixed(3),
-        minScale,
-        maxScale
+      const dir = e.deltaY < 0 ? 1 : -1;
+      const newScale = Math.min(
+        maxScale,
+        Math.max(minScale, +(oldScale + dir * zoomStep).toFixed(3))
       );
       if (newScale === oldScale) return;
 
@@ -364,7 +419,7 @@ const AnimationFrameRail = ({
                 </button>
               </div>
 
-              {/* Canvas area is marked interactive so viewport doesn't hijack its wheel */}
+              {/* Canvas area */}
               <div
                 className="min-w-[300px] min-h-[300px]"
                 data-canvas-interactive="true"
@@ -385,7 +440,6 @@ const AnimationFrameRail = ({
                     frameApisRef.current.set(frame.id, api);
                     if (frame.seedSnapshot) {
                       api.loadFromSnapshot?.(frame.seedSnapshot);
-                      // clear seed once applied
                       setFrames((prev) => {
                         const i = prev.findIndex((f) => f.id === frame.id);
                         if (i === -1) return prev;

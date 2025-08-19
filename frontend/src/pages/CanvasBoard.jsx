@@ -45,6 +45,8 @@ const CanvasBoard = () => {
   const [animLayers, setAnimLayers] = useState([]);
   const [animSelectedLayerId, setAnimSelectedLayerId] = useState(null);
   const animLayerApiRef = useRef(null);
+  const animRailApiRef = useRef(null);
+  const pendingAnimSnapshotRef = useRef(null); // NEW: buffer until rail API ready
 
   // Pixel canvas API (from PixelGridCanvas)
   const pixelApiRef = useRef({});
@@ -102,7 +104,6 @@ const CanvasBoard = () => {
       if (mode === "static") {
         return id === "undo" ? void doUndo() : void doRedo();
       }
-      // animation-mode undo/redo to be added later
       return;
     }
     setSelectedTool(id);
@@ -263,6 +264,7 @@ const CanvasBoard = () => {
     return `${stem} (${n})`;
   };
 
+  // ---- Static save ----
   const saveProject = async () => {
     const user = getUser();
     if (!user) return setToastMsg("Please log in to save.");
@@ -300,7 +302,6 @@ const CanvasBoard = () => {
           return;
         }
 
-        // Name conflict -> prompt rename and retry
         if (res.status === 409) {
           const suggested = suggestNextName(currentName);
           const next = window.prompt(
@@ -322,7 +323,6 @@ const CanvasBoard = () => {
           continue;
         }
 
-        // Other errors
         setToastMsg(text || "Save failed.");
         return;
       } catch {
@@ -334,7 +334,114 @@ const CanvasBoard = () => {
     setToastMsg("Too many attempts. Please try a different name.");
   };
 
-  // ---------- LOAD EXISTING PROJECT ----------
+  // ---- Animation save ----
+  const anyPixelsInFrames = (frames = []) => {
+    for (const f of frames) {
+      for (const l of f.layers || []) {
+        const rows = l.pixels || [];
+        for (let r = 0; r < rows.length; r++) {
+          const row = rows[r] || [];
+          for (let c = 0; c < row.length; c++) {
+            if (row[c]) return true;
+          }
+        }
+      }
+    }
+    return false;
+  };
+
+  const saveAnimationProject = async () => {
+    const user = getUser();
+    if (!user) return setToastMsg("Please log in to save.");
+    const rail = animRailApiRef.current;
+    if (!rail?.collectAnimationSnapshot) {
+      return setToastMsg("Animation rail not ready.");
+    }
+
+    const animSnap = rail.collectAnimationSnapshot();
+    if (!animSnap?.frames?.length) {
+      return setToastMsg(
+        "Nothing to save yet — add a frame and draw something first."
+      );
+    }
+    if (!anyPixelsInFrames(animSnap.frames)) {
+      return setToastMsg("Nothing to save yet — draw something first.");
+    }
+
+    const method = projectId ? "PUT" : "POST";
+    const url = projectId
+      ? `/api/projects/animations/${projectId}?userId=${user.id}`
+      : `/api/projects/animations?userId=${user.id}`;
+
+    let currentName = projectName || "Untitled";
+    let attempts = 0;
+
+    const buildAnimPayload = (snap, nameOverride) => ({
+      name: (nameOverride ?? projectName) || "Untitled",
+      width: snap.width,
+      height: snap.height,
+      frames: (snap.frames || []).map((f) => ({
+        id: f.id,
+        name: f.name,
+        selectedLayerId: f.selectedLayerId ?? null,
+        layers: f.layers,
+      })),
+      previewPng: snap.previewPng || null,
+      favorite: false,
+    });
+
+    while (attempts < 5) {
+      try {
+        const payload = buildAnimPayload(animSnap, currentName);
+        const res = await fetch(url, {
+          method,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        const text = await res.text();
+
+        if (res.ok) {
+          const data = JSON.parse(text);
+          if (!projectId && data.id) setProjectId(data.id);
+          setProjectName(currentName);
+          setToastMsg(projectId ? "Animation updated." : "Animation saved.");
+          return;
+        }
+
+        if (res.status === 409) {
+          const suggested = suggestNextName(currentName);
+          const next = window.prompt(
+            `A project named "${currentName}" already exists.\nPlease enter a different name:`,
+            suggested
+          );
+          if (next === null) {
+            setToastMsg("Save cancelled.");
+            return;
+          }
+          const trimmed = next.trim();
+          if (!trimmed) {
+            setToastMsg("Name cannot be empty.");
+            attempts++;
+            continue;
+          }
+          currentName = trimmed;
+          attempts++;
+          continue;
+        }
+
+        setToastMsg(text || "Save failed.");
+        return;
+      } catch {
+        setToastMsg("Network error while saving.");
+        return;
+      }
+    }
+
+    setToastMsg("Too many attempts. Please try a different name.");
+  };
+
+  // ---------- LOAD EXISTING PROJECT (try static, then animation) ----------
   useEffect(() => {
     const user = getUser();
     if (!user || !projectId) return;
@@ -342,38 +449,81 @@ const CanvasBoard = () => {
     let cancelled = false;
     (async () => {
       try {
+        // Try STATIC first
         const res = await fetch(`/api/projects/${projectId}?userId=${user.id}`);
-        if (!res.ok) {
-          const t = await res.text();
-          throw new Error(t || "Failed to load project.");
+        if (res.ok) {
+          const p = await res.json();
+          if (cancelled) return;
+
+          setMode("static");
+          setProjectName(p.name || "Untitled");
+          setWidth(p.width);
+          setHeight(p.height);
+          setSelectedLayerId(p.selectedLayerId || null);
+
+          const meta = (p.layers || []).map((l) => ({
+            id: l.id,
+            name: l.name,
+            visible: !!l.visible,
+            locked: !!l.locked,
+          }));
+          setLayers(meta);
+
+          setTimeout(() => {
+            pixelApiRef.current.loadFromSnapshot?.({
+              width: p.width,
+              height: p.height,
+              selectedLayerId: p.selectedLayerId,
+              layers: p.layers,
+              previewPng: p.previewPng,
+            });
+          }, 0);
+          return;
         }
-        const p = await res.json();
-        if (cancelled) return;
 
-        setProjectName(p.name || "Untitled");
-        setWidth(p.width);
-        setHeight(p.height);
-        setSelectedLayerId(p.selectedLayerId || null);
+        // If NOT found as static, try ANIMATION
+        if (res.status === 404) {
+          const resAnim = await fetch(
+            `/api/projects/animations/${projectId}?userId=${user.id}`
+          );
+          if (!resAnim.ok) {
+            const t = await resAnim.text();
+            throw new Error(t || "Failed to load project.");
+          }
+          const pa = await resAnim.json();
+          if (cancelled) return;
 
-        const meta = (p.layers || []).map((l) => ({
-          id: l.id,
-          name: l.name,
-          visible: !!l.visible,
-          locked: !!l.locked,
-        }));
-        setLayers(meta);
+          setMode("animations");
+          setProjectName(pa.name || "Untitled");
+          setWidth(pa.width);
+          setHeight(pa.height);
 
-        setTimeout(() => {
-          pixelApiRef.current.loadFromSnapshot?.({
-            width: p.width,
-            height: p.height,
-            selectedLayerId: p.selectedLayerId,
-            layers: p.layers,
-            previewPng: p.previewPng,
-          });
-        }, 0);
+          // If rail API is not ready yet, buffer the snapshot and apply later.
+          const snapshot = {
+            width: pa.width,
+            height: pa.height,
+            frames: (pa.frames || []).map((f) => ({
+              id: f.id,
+              name: f.name,
+              selectedLayerId: f.selectedLayerId ?? null,
+              layers: f.layers,
+            })),
+            previewPng: pa.previewPng || null,
+          };
+
+          if (animRailApiRef.current?.loadFromAnimationSnapshot) {
+            animRailApiRef.current.loadFromAnimationSnapshot(snapshot);
+          } else {
+            pendingAnimSnapshotRef.current = snapshot;
+          }
+          return;
+        }
+
+        // Other error
+        const t = await res.text();
+        throw new Error(t || "Failed to load project.");
       } catch (e) {
-        setToastMsg(e.message || "Could not open project.");
+        if (!cancelled) setToastMsg(e.message || "Could not open project.");
       }
     })();
 
@@ -382,7 +532,16 @@ const CanvasBoard = () => {
     };
   }, [projectId]);
 
-  // ---------- EXPORT (PNG/JPEG download) ----------
+  // When the rail API becomes available, flush any pending animation snapshot.
+  const handleExposeRailAPI = (api) => {
+    animRailApiRef.current = api || null;
+    if (api && pendingAnimSnapshotRef.current) {
+      api.loadFromAnimationSnapshot?.(pendingAnimSnapshotRef.current);
+      pendingAnimSnapshotRef.current = null;
+    }
+  };
+
+  // ---------- EXPORT ----------
   const renderSnapshotToDataURL = (
     snapshot,
     format = "png",
@@ -403,7 +562,7 @@ const CanvasBoard = () => {
       ctx.fillRect(0, 0, cvs.width, cvs.height);
     }
 
-    // Draw bottom -> top (your stored order is top-first)
+    // Draw bottom -> top (stored order is top-first)
     const ordered = [...layersArr].reverse();
     for (const ly of ordered) {
       if (ly.visible === false) continue;
@@ -468,8 +627,7 @@ const CanvasBoard = () => {
           showSaveButton
           onSaveClick={() => {
             if (mode === "animations") {
-              // TODO: replace with real animation save once API is ready
-              setToastMsg("Saving animations will be added soon.");
+              saveAnimationProject();
               return;
             }
             saveProject();
@@ -584,7 +742,6 @@ const CanvasBoard = () => {
                       setShowColorPicker(true);
                     }
                   }}
-                  // <<< Animations-mode Layer bridge
                   onActiveFrameMeta={({ layers, selectedLayerId }) => {
                     setAnimLayers(layers || []);
                     setAnimSelectedLayerId(selectedLayerId ?? null);
@@ -593,6 +750,7 @@ const CanvasBoard = () => {
                     animLayerApiRef.current = api || null;
                   }}
                   onFramesCountChange={(n) => setFramesCount(n)}
+                  onExposeRailAPI={handleExposeRailAPI}
                 />
               </div>
             )}

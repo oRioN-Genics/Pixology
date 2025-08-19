@@ -25,14 +25,14 @@ const LibraryPage = () => {
   const [params] = useSearchParams();
   const [toastMsg, setToastMsg] = useState("");
   const [loading, setLoading] = useState(true);
-  const [projects, setProjects] = useState([]);
+  const [projects, setProjects] = useState([]); // [{ id, name, width, height, previewPng, favorite, updatedAt }]
   const [selectedId, setSelectedId] = useState(null);
 
   const user = useMemo(readUser, []);
   const tab = (params.get("tab") || "recents").toLowerCase();
   const isFavTab = tab === "favourites" || tab === "favorites";
 
-  // fetch projects
+  // Single list endpoint: backend returns both STATIC and ANIMATION summaries.
   useEffect(() => {
     if (!user) {
       setToastMsg("Please log in to view your library.");
@@ -46,13 +46,19 @@ const LibraryPage = () => {
         setLoading(true);
         const q = new URLSearchParams({ userId: user.id });
         if (isFavTab) q.set("favorite", "true");
+
         const res = await fetch(`/api/projects?${q.toString()}`);
         if (!res.ok) {
           const t = await res.text();
           throw new Error(t || "Failed to fetch projects.");
         }
         const list = await res.json();
-        if (!ignore) setProjects(Array.isArray(list) ? list : []);
+        const normalized = (Array.isArray(list) ? list : []).sort((a, b) => {
+          const ta = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+          const tb = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+          return tb - ta;
+        });
+        if (!ignore) setProjects(normalized);
       } catch (e) {
         if (!ignore) setToastMsg(e.message || "Network error.");
       } finally {
@@ -65,6 +71,7 @@ const LibraryPage = () => {
     };
   }, [user, navigate, isFavTab]);
 
+  // Open: we don't need kind—CanvasBoard probes static first, then animation.
   const openProject = (p) => {
     navigate("/canvas", {
       state: {
@@ -76,62 +83,40 @@ const LibraryPage = () => {
     });
   };
 
-  // Toggle favorite
+  // Toggle favorite (generic endpoint works for both kinds)
   const toggleFavorite = async (id, next) => {
     if (!user) {
       setToastMsg("Please log in to change favorites.");
       return;
     }
 
+    const snapshot = projects;
+
     if (isFavTab && !next) {
-      const snapshot = projects;
       setProjects((prev) => prev.filter((p) => p.id !== id));
-      try {
-        const res = await fetch(
-          `/api/projects/${id}/favorite?userId=${user.id}`,
-          {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ favorite: false }),
-          }
-        );
-        if (!res.ok) {
-          const t = await res.text();
-          throw new Error(t || "Failed to update favorite.");
-        }
-      } catch (e) {
-        setProjects(snapshot); // revert
-        setToastMsg(e.message || "Could not update favorite.");
-      }
-      return;
+    } else {
+      setProjects((prev) =>
+        prev.map((p) => (p.id === id ? { ...p, favorite: next } : p))
+      );
     }
 
-    setProjects((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, favorite: next } : p))
-    );
     try {
       const res = await fetch(
-        `/api/projects/${id}/favorite?userId=${user.id}`,
+        `/api/projects/${id}/favorite?userId=${encodeURIComponent(user.id)}`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ favorite: next }),
         }
       );
-      if (!res.ok) {
-        const t = await res.text();
-        throw new Error(t || "Failed to update favorite.");
-      }
+      if (!res.ok) throw new Error(await res.text());
     } catch (e) {
-      // revert
-      setProjects((prev) =>
-        prev.map((p) => (p.id === id ? { ...p, favorite: !next } : p))
-      );
+      setProjects(snapshot);
       setToastMsg(e.message || "Could not update favorite.");
     }
   };
 
-  // Delete handler
+  // Delete (generic endpoint works for both kinds)
   const confirmDelete = async (id) => {
     if (!user) {
       setToastMsg("Please log in to delete projects.");
@@ -142,22 +127,18 @@ const LibraryPage = () => {
     const ok = window.confirm(`Delete ${label}? This cannot be undone.`);
     if (!ok) return;
 
-    // optimistic remove
     const snapshot = projects;
     setProjects((prev) => prev.filter((p) => p.id !== id));
     if (selectedId === id) setSelectedId(null);
 
     try {
-      const res = await fetch(`/api/projects/${id}?userId=${user.id}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) {
-        const t = await res.text();
-        throw new Error(t || "Failed to delete project.");
-      }
+      const res = await fetch(
+        `/api/projects/${id}?userId=${encodeURIComponent(user.id)}`,
+        { method: "DELETE" }
+      );
+      if (!res.ok) throw new Error(await res.text());
       setToastMsg("Project deleted.");
     } catch (e) {
-      // revert on error
       setProjects(snapshot);
       setToastMsg(e.message || "Could not delete project.");
     }
@@ -207,7 +188,7 @@ const LibraryPage = () => {
                 onDoubleClick={() => openProject(p)}
                 onContextMenu={(id, e) => console.log("Context menu:", id)}
                 onToggleFavorite={toggleFavorite}
-                onDelete={(id) => confirmDelete(id)}
+                onDelete={confirmDelete}
               />
             ))}
           </div>

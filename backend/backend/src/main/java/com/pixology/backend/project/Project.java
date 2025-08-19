@@ -5,7 +5,6 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
-
 import java.time.Instant;
 import java.util.List;
 
@@ -16,21 +15,25 @@ public class Project {
     private String id;
 
     @Field("userId")
-    private String userId; // reference to Users._id (stored as String)
+    private String userId;
 
     private String name;
 
     private int width;
     private int height;
 
-    private String selectedLayerId;
+    /** STATIC | ANIMATION (defaults to STATIC for old docs) */
+    private ProjectKind kind = ProjectKind.STATIC;
 
-    // Embedded layers
+    // ---------- STATIC fields (unchanged) ----------
+    private String selectedLayerId;
     private List<ProjectLayer> layers;
 
-    // Small PNG preview as data URL ("data:image/png;base64,...")
-    private String previewPng;
+    // ---------- ANIMATION fields ----------
+    private List<AnimationFrame> frames;
 
+    // ---------- Common ----------
+    private String previewPng;
     private boolean favorite;
 
     @CreatedDate
@@ -55,11 +58,17 @@ public class Project {
     public int getHeight() { return height; }
     public void setHeight(int height) { this.height = height; }
 
+    public ProjectKind getKind() { return kind; }
+    public void setKind(ProjectKind kind) { this.kind = kind; }
+
     public String getSelectedLayerId() { return selectedLayerId; }
     public void setSelectedLayerId(String selectedLayerId) { this.selectedLayerId = selectedLayerId; }
 
     public List<ProjectLayer> getLayers() { return layers; }
     public void setLayers(List<ProjectLayer> layers) { this.layers = layers; }
+
+    public List<AnimationFrame> getFrames() { return frames; }
+    public void setFrames(List<AnimationFrame> frames) { this.frames = frames; }
 
     public String getPreviewPng() { return previewPng; }
     public void setPreviewPng(String previewPng) { this.previewPng = previewPng; }

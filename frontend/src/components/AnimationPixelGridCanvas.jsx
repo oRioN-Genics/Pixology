@@ -74,14 +74,13 @@ const AnimationPixelGridCanvas = ({
   const handlePointerLeave = () => setIsPointerInside(false);
 
   // ------ per-layer pixel buffers ------
-  // Map<layerId, string|null[][]>
   const [buffers, setBuffers] = useState(() => new Map());
   const makeBlank = () =>
     Array.from({ length: height }, () =>
       Array.from({ length: width }, () => null)
     );
 
-  // Keep buffers in sync with layers and size (create/drop maps)
+  // Keep buffers in sync with layers and size
   useEffect(() => {
     setBuffers((prev) => {
       const next = new Map(prev);
@@ -96,7 +95,7 @@ const AnimationPixelGridCanvas = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layers, width, height]);
 
-  // composite visible layers: first non-null from topmost (layers[0] is top)
+  // composite visible layers: first non-null from topmost
   const compositeAt = (row, col) => {
     for (const ly of layers) {
       if (!ly.visible) continue;
@@ -209,7 +208,6 @@ const AnimationPixelGridCanvas = ({
   // allow parent to seed buffers from a backend snapshot
   const loadFromSnapshot = (snapshot) => {
     if (!snapshot || !Array.isArray(snapshot.layers)) return;
-    // Build a new buffers Map using the snapshot pixels
     setBuffers(() => {
       const next = new Map();
       snapshot.layers.forEach((l) => {
@@ -299,7 +297,6 @@ const AnimationPixelGridCanvas = ({
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-
     const handleWheel = (e) => {
       if (!isPointerInside) return;
       e.preventDefault();
@@ -310,7 +307,6 @@ const AnimationPixelGridCanvas = ({
         return Math.min(4, Math.max(0.5, next));
       });
     };
-
     el.addEventListener("wheel", handleWheel, { passive: false });
     return () => el.removeEventListener("wheel", handleWheel);
   }, [isPointerInside]);
@@ -462,16 +458,7 @@ const AnimationPixelGridCanvas = ({
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
-      style={{
-        cursor:
-          selectedTool === "hand"
-            ? isDragging
-              ? "grabbing"
-              : "grab"
-            : isDragging && dragSource === "middle"
-            ? "grabbing"
-            : "crosshair",
-      }}
+      style={{ cursor: cursorStyle }}
     >
       <div
         ref={gridRef}
@@ -498,9 +485,6 @@ const AnimationPixelGridCanvas = ({
                   key={`${row}-${col}`}
                   className="transition-colors duration-75 ease-in-out"
                   style={{
-                    width: `px`,
-                    height: `px`,
-                    // fix: set widths via cellSize constants
                     width: `${cellSize}px`,
                     height: `${cellSize}px`,
                     backgroundColor: px ?? baseColor,

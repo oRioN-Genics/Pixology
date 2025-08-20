@@ -128,17 +128,21 @@ public class ProjectService {
             }).toList());
             return f;
         }).toList());
+
         if (req.getAnimations() != null) {
             p.setAnimations(req.getAnimations().stream().map(adto -> {
                 AnimationBlock b = new AnimationBlock();
                 b.setId(adto.getId());
                 b.setName(adto.getName());
                 b.setFrames(adto.getFrames());
+                // NEW: loopMode
+                b.setLoopMode(normalizeLoopMode(adto.getLoopMode()));
                 return b;
             }).toList());
         } else {
             p.setAnimations(null);
         }
+
         p.setPreviewPng(normalizeDataUrl(req.getPreviewPng()));
         p.setFavorite(Boolean.TRUE.equals(req.getFavorite()));
         p.setCreatedAt(Instant.now());
@@ -185,17 +189,21 @@ public class ProjectService {
             }).toList());
             return f;
         }).toList());
+
         if (req.getAnimations() != null) {
             p.setAnimations(req.getAnimations().stream().map(adto -> {
                 AnimationBlock b = new AnimationBlock();
                 b.setId(adto.getId());
                 b.setName(adto.getName());
                 b.setFrames(adto.getFrames());
+                // NEW: loopMode
+                b.setLoopMode(normalizeLoopMode(adto.getLoopMode()));
                 return b;
             }).toList());
         } else {
             p.setAnimations(null);
         }
+
         p.setPreviewPng(normalizeDataUrl(req.getPreviewPng()));
         p.setFavorite(Boolean.TRUE.equals(req.getFavorite()));
         p.setUpdatedAt(Instant.now());
@@ -272,6 +280,12 @@ public class ProjectService {
             if (f.getLayers() == null || f.getLayers().isEmpty())
                 throw new IllegalArgumentException("each frame must have at least one layer");
         }
+        // Validate loop modes if blocks provided
+        if (req.getAnimations() != null) {
+            for (SaveAnimationRequest.AnimationBlockDto b : req.getAnimations()) {
+                normalizeLoopMode(b.getLoopMode()); // will throw if invalid
+            }
+        }
     }
 
     private String normalizeDataUrl(String s) {
@@ -323,11 +337,25 @@ public class ProjectService {
         r.setWidth(p.getWidth());
         r.setHeight(p.getHeight());
         r.setFrames(p.getFrames());
-        r.setAnimations(p.getAnimations());
+        r.setAnimations(p.getAnimations()); // includes loopMode now
         r.setFavorite(p.isFavorite());
         r.setPreviewPng(p.getPreviewPng());
         r.setCreatedAt(p.getCreatedAt());
         r.setUpdatedAt(p.getUpdatedAt());
         return r;
+    }
+
+    // Accepts null/blank -> "forward"; validates allowed values.
+    private String normalizeLoopMode(String loopMode) {
+        String v = (loopMode == null) ? "" : loopMode.trim().toLowerCase();
+        if (v.isEmpty()) return "forward";
+        switch (v) {
+            case "forward":
+            case "backward":
+            case "pingpong":
+                return v;
+            default:
+                throw new IllegalArgumentException("invalid loopMode: " + loopMode);
+        }
     }
 }

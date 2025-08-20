@@ -28,6 +28,9 @@ import playIcon from "./tools/preview_tools/playIcon.png";
 import nextFrameIcon from "./tools/preview_tools/nextFrameIcon.png";
 import lastFrameIcon from "./tools/preview_tools/lastFrameIcon.png";
 import stopIcon from "./tools/preview_tools/stopIcon.png";
+import forwardLoopIcon from "./tools/preview_tools/forwardLoopIcon.png";
+import backwardLoopIcon from "./tools/preview_tools/backwardLoopIcon.png";
+import pingPongLoopIcon from "./tools/preview_tools/pingPongLoopIcon.png";
 
 export const assets = {
   Icon,
@@ -56,4 +59,7 @@ export const assets = {
   nextFrameIcon,
   lastFrameIcon,
   stopIcon,
+  forwardLoopIcon,
+  backwardLoopIcon,
+  pingPongLoopIcon,
 };

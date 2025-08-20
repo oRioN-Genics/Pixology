@@ -17,8 +17,7 @@ public class SaveAnimationRequest {
     @NotNull @Size(min = 1)
     private List<FrameDto> frames;
 
-    // NEW: optional timeline blocks
-    // blocks may be empty or null; if provided, names required, frames may be empty
+    // Timeline blocks (optional). If provided, names required; frames can be empty.
     private List<AnimationBlockDto> animations;
 
     // small preview (first frame or generated)
@@ -70,7 +69,7 @@ public class SaveAnimationRequest {
         public void setLayers(List<LayerDto> layers) { this.layers = layers; }
     }
 
-    // NEW: timeline block DTO
+    // Timeline block DTO
     public static class AnimationBlockDto {
         @NotBlank
         private String id;
@@ -79,12 +78,22 @@ public class SaveAnimationRequest {
         @NotNull
         private List<Integer> frames; // can be empty
 
+        /**
+         * Looping mode for this block.
+         * Allowed: "forward" | "backward" | "pingpong"
+         * Optional; default "forward" server-side if null/blank.
+         */
+        private String loopMode;
+
         public String getId() { return id; }
         public void setId(String id) { this.id = id; }
         public String getName() { return name; }
         public void setName(String name) { this.name = name; }
         public List<Integer> getFrames() { return frames; }
         public void setFrames(List<Integer> frames) { this.frames = frames; }
+
+        public String getLoopMode() { return loopMode; }
+        public void setLoopMode(String loopMode) { this.loopMode = loopMode; }
     }
 
     public String getName() { return name; }

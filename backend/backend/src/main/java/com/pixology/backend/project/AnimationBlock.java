@@ -8,6 +8,13 @@ public class AnimationBlock {
     private String name;
     private List<Integer> frames;
 
+    /**
+     * Looping mode for playback.
+     * Allowed values: "forward" | "backward" | "pingpong"
+     * Defaults to "forward" if null.
+     */
+    private String loopMode;
+
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
 
@@ -16,4 +23,7 @@ public class AnimationBlock {
 
     public List<Integer> getFrames() { return frames; }
     public void setFrames(List<Integer> frames) { this.frames = frames; }
+
+    public String getLoopMode() { return loopMode; }
+    public void setLoopMode(String loopMode) { this.loopMode = loopMode; }
 }

@@ -113,7 +113,6 @@ const CanvasBoard = () => {
       if (mode === "static") {
         return id === "undo" ? void doUndoStatic() : void doRedoStatic();
       }
-      // animations mode -> call rail
       const rail = animRailApiRef.current;
       if (!rail) return;
       if (id === "undo") rail.undo?.();
@@ -135,7 +134,6 @@ const CanvasBoard = () => {
       const ctrlOrCmd = e.ctrlKey || e.metaKey;
       if (!ctrlOrCmd) return;
 
-      // Undo
       if (key === "z" && !e.shiftKey) {
         e.preventDefault();
         if (mode === "static") doUndoStatic();
@@ -143,7 +141,6 @@ const CanvasBoard = () => {
         return;
       }
 
-      // Redo
       if (key === "y" || (key === "z" && e.shiftKey)) {
         e.preventDefault();
         if (mode === "static") doRedoStatic();
@@ -253,7 +250,6 @@ const CanvasBoard = () => {
     });
   };
 
-  // From canvas: pixel history
   const handlePushHistoryFromCanvas = (entry) => pushHistory(entry);
 
   // ---------- SAVE----------
@@ -275,7 +271,6 @@ const CanvasBoard = () => {
     favorite: false,
   });
 
-  // Suggests "Name (1)", "Name (2)", etc.
   const suggestNextName = (base) => {
     const m = String(base || "Untitled").match(/^(.*?)(?:\s\((\d+)\))?$/);
     const stem = m && m[1] ? m[1] : base || "Untitled";
@@ -353,7 +348,6 @@ const CanvasBoard = () => {
     setToastMsg("Too many attempts. Please try a different name.");
   };
 
-  // ---- Animation save helpers ----
   const anyPixelsInFrames = (frames = []) => {
     for (const f of frames) {
       for (const l of f.layers || []) {
@@ -387,7 +381,7 @@ const CanvasBoard = () => {
       return setToastMsg("Nothing to save yet — draw something first.");
     }
 
-    // timeline blocks snapshot
+    // timeline blocks snapshot (includes loopMode via TimelinePanel)
     const timeline = timelineApiRef.current?.collectTimelineSnapshot?.() || [];
 
     const method = projectId ? "PUT" : "POST";
@@ -412,6 +406,7 @@ const CanvasBoard = () => {
         id: a.id,
         name: a.name,
         frames: a.frames || [],
+        loopMode: a.loopMode || "forward", // <-- FIX: include loopMode
       })),
       previewPng: snap.previewPng || null,
       favorite: false,
@@ -537,7 +532,7 @@ const CanvasBoard = () => {
             previewPng: pa.previewPng || null,
           };
 
-          // timeline animations from backend
+          // timeline animations from backend (already contain loopMode if present)
           setInitialTimelineAnims(pa.animations || []);
 
           if (animRailApiRef.current?.loadFromAnimationSnapshot) {
@@ -591,7 +586,6 @@ const CanvasBoard = () => {
       ctx.fillRect(0, 0, cvs.width, cvs.height);
     }
 
-    // bottom -> top (stored order is top-first)
     const ordered = [...layersArr].reverse();
     for (const ly of ordered) {
       if (ly.visible === false) continue;
@@ -754,11 +748,11 @@ const CanvasBoard = () => {
               if (!animSnap?.frames?.length) return "No frames to export.";
               if (!anyPixelsInFrames(animSnap.frames))
                 return "Nothing to export — draw something first.";
-              return true; // allow popover for PNG/JPG
+              return true;
             }
             if (pixelApiRef.current?.isEmpty?.())
               return "Nothing in the canvas to export.";
-            return true; // allow popover
+            return true;
           }}
           onExportBlocked={(reason) => setToastMsg(reason)}
           onExportPick={handleExportPick}

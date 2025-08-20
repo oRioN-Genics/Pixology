@@ -1,12 +1,19 @@
 // TimelinePanel.jsx
 import React, { useRef, useState, useEffect } from "react";
 import { assets } from "../assets";
-import PreviewWindow from "../components/PreviewWindow"; // <-- add
+import PreviewWindow from "../components/PreviewWindow";
 
 const makeId = (p = "anim") =>
   `${p}-${Math.random().toString(36).slice(2, 8)}-${Date.now()
     .toString(36)
     .slice(-4)}`;
+
+// loop mode helpers
+const LOOP_MODES = ["forward", "backward", "pingpong"];
+const nextLoopMode = (m) => {
+  const i = LOOP_MODES.indexOf(m);
+  return LOOP_MODES[(i + 1) % LOOP_MODES.length];
+};
 
 const TimelinePanel = ({
   className = "",
@@ -15,14 +22,13 @@ const TimelinePanel = ({
   initialAnimations = [],
   onExposeTimelineAPI,
 
-  // NEW (optional): provide actual frame sources for the preview
-  // e.g., array of canvases / ImageBitmaps / HTMLImages / or drawer fns (ctx,w,h)=>void
+  // preview props
   previewFrames = [],
   previewWidth = 128,
   previewHeight = 128,
   onRegisterPreviewAPI, // optional passthrough if parent wants the preview API too
 }) => {
-  const [anims, setAnims] = useState([]); // [{id, name, frames:number[]}]
+  const [anims, setAnims] = useState([]); // [{id, name, frames:number[], loopMode?}]
   const animsRef = useRef(anims);
   useEffect(() => {
     animsRef.current = anims;
@@ -47,7 +53,7 @@ const TimelinePanel = ({
   // Track if a blocking prompt is open
   const isPromptOpenRef = useRef(false);
 
-  // --- NEW: preview ref
+  // preview ref
   const previewRef = useRef(null);
 
   // ---------- seed from parent when provided (guarded) ----------
@@ -60,9 +66,11 @@ const TimelinePanel = ({
       id: a.id || makeId(),
       name: a.name || "untitled animation",
       frames: Array.isArray(a.frames) ? a.frames.slice() : [],
+      loopMode: a.loopMode || "forward", // NEW
     }));
     setAnims(seeded);
 
+    // compute next untitled index
     const untitledNums = seeded
       .map((a) => a.name?.match(/^untitled animation\s+(\d+)$/i)?.[1])
       .filter(Boolean)
@@ -83,12 +91,14 @@ const TimelinePanel = ({
           id: a.id,
           name: a.name,
           frames: a.frames.slice(),
+          loopMode: a.loopMode || "forward", // NEW
         })),
       loadFromTimelineSnapshot: (arr) => {
         const next = (Array.isArray(arr) ? arr : []).map((a) => ({
           id: a.id || makeId(),
           name: a.name || "untitled animation",
           frames: Array.isArray(a.frames) ? a.frames.slice() : [],
+          loopMode: a.loopMode || "forward", // NEW
         }));
         setAnims(next);
 
@@ -186,7 +196,10 @@ const TimelinePanel = ({
     const id = makeId();
     const name = `untitled animation ${untitledIdx}`;
     setUntitledIdx((i) => i + 1);
-    setAnims((prev) => [...prev, { id, name, frames: [] }]);
+    setAnims((prev) => [
+      ...prev,
+      { id, name, frames: [], loopMode: "forward" }, // NEW
+    ]);
   };
 
   const removeAnimation = (animId) => {
@@ -218,12 +231,16 @@ const TimelinePanel = ({
     setEditingText("");
   };
 
+  /**
+   * Prompt for a frame number and add it to the block if valid.
+   * Returns true if a frame was added, false otherwise.
+   */
   const promptAddFrame = (animId) => {
     try {
       isPromptOpenRef.current = true;
 
       const raw = window.prompt("Enter frame number to add:");
-      if (raw === null) return false;
+      if (raw === null) return false; // cancelled
 
       const num = parseInt(String(raw).trim(), 10);
       if (!Number.isFinite(num) || num < 1) {
@@ -241,6 +258,7 @@ const TimelinePanel = ({
         return false;
       }
 
+      // valid -> update only the target block
       setAnims((prev) =>
         prev.map((a) => {
           if (a.id !== animId) return a;
@@ -249,6 +267,7 @@ const TimelinePanel = ({
       );
       return true;
     } finally {
+      // release the prompt lock
       isPromptOpenRef.current = false;
     }
   };
@@ -263,10 +282,12 @@ const TimelinePanel = ({
     setSelection({ animId: anim.id, frameNum, _idx: occIdx });
     setSelectedAnimId(anim.id);
   };
+
   const onFrameDragOver = (e) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
   };
+
   const onFrameDropOnChip = (e, targetAnimId, targetFrameNum) => {
     e.preventDefault();
     const info = dragInfo.current;
@@ -289,6 +310,7 @@ const TimelinePanel = ({
       })
     );
   };
+
   const onFrameDropAtEnd = (e, targetAnimId) => {
     e.preventDefault();
     const info = dragInfo.current;
@@ -310,6 +332,17 @@ const TimelinePanel = ({
   };
 
   const transportDisabled = !selectedAnimId;
+
+  // NEW: loop mode toggle
+  const toggleLoopMode = (animId) => {
+    setAnims((prev) =>
+      prev.map((a) => {
+        if (a.id !== animId) return a;
+        const cur = a.loopMode || "forward";
+        return { ...a, loopMode: nextLoopMode(cur) };
+      })
+    );
+  };
 
   // --- (Optional) keep preview fed with sources; parent can update this prop anytime
   useEffect(() => {
@@ -489,6 +522,36 @@ const TimelinePanel = ({
                               >
                                 Add frame
                               </button>
+
+                              {/* Loop mode toggle (between Add & Delete) */}
+                              <button
+                                aria-label="Toggle loop mode"
+                                className="w-6 h-6 rounded-md border border-[#cfe0f1] bg-white flex items-center justify-center hover:bg-[#eef6ff]"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleLoopMode(anim.id);
+                                }}
+                                title={
+                                  anim.loopMode === "backward"
+                                    ? "Loop: Backward"
+                                    : anim.loopMode === "pingpong"
+                                    ? "Loop: Ping-Pong"
+                                    : "Loop: Forward"
+                                }
+                              >
+                                <img
+                                  src={
+                                    anim.loopMode === "backward"
+                                      ? assets.backwardLoopIcon
+                                      : anim.loopMode === "pingpong"
+                                      ? assets.pingPongLoopIcon
+                                      : assets.forwardLoopIcon
+                                  }
+                                  alt=""
+                                  className="w-3.5 h-3.5 pointer-events-none"
+                                />
+                              </button>
+
                               <button
                                 data-del-anim="1"
                                 aria-label="Delete animation"

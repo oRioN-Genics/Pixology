@@ -1,5 +1,7 @@
+// TimelinePanel.jsx
 import React, { useRef, useState, useEffect } from "react";
 import { assets } from "../assets";
+import PreviewWindow from "../components/PreviewWindow"; // <-- add
 
 const makeId = (p = "anim") =>
   `${p}-${Math.random().toString(36).slice(2, 8)}-${Date.now()
@@ -12,6 +14,13 @@ const TimelinePanel = ({
   onToast = () => {},
   initialAnimations = [],
   onExposeTimelineAPI,
+
+  // NEW (optional): provide actual frame sources for the preview
+  // e.g., array of canvases / ImageBitmaps / HTMLImages / or drawer fns (ctx,w,h)=>void
+  previewFrames = [],
+  previewWidth = 128,
+  previewHeight = 128,
+  onRegisterPreviewAPI, // optional passthrough if parent wants the preview API too
 }) => {
   const [anims, setAnims] = useState([]); // [{id, name, frames:number[]}]
   const animsRef = useRef(anims);
@@ -38,6 +47,9 @@ const TimelinePanel = ({
   // Track if a blocking prompt is open
   const isPromptOpenRef = useRef(false);
 
+  // --- NEW: preview ref
+  const previewRef = useRef(null);
+
   // ---------- seed from parent when provided (guarded) ----------
   const didSeedRef = useRef(false);
   useEffect(() => {
@@ -51,7 +63,6 @@ const TimelinePanel = ({
     }));
     setAnims(seeded);
 
-    // compute next untitled index
     const untitledNums = seeded
       .map((a) => a.name?.match(/^untitled animation\s+(\d+)$/i)?.[1])
       .filter(Boolean)
@@ -81,7 +92,6 @@ const TimelinePanel = ({
         }));
         setAnims(next);
 
-        // recompute the untitled counter
         const untitledNums = next
           .map((a) => a.name?.match(/^untitled animation\s+(\d+)$/i)?.[1])
           .filter(Boolean)
@@ -89,6 +99,8 @@ const TimelinePanel = ({
           .filter((n) => Number.isFinite(n));
         setUntitledIdx(untitledNums.length ? Math.max(...untitledNums) + 1 : 1);
       },
+      // (Optional) let parent reach the preview directly
+      getPreviewAPI: () => previewRef.current || null,
     };
     onExposeTimelineAPI(api);
   }, [onExposeTimelineAPI]);
@@ -125,10 +137,9 @@ const TimelinePanel = ({
   // Global Delete to remove selected frame
   useEffect(() => {
     const onKey = (e) => {
-      // If a blocking prompt is open, ignore key events entirely
       if (isPromptOpenRef.current) return;
 
-      if (editingId) return; // don't delete while editing a name
+      if (editingId) return;
       if (!selection) return;
 
       if (e.key === "Delete" || e.key === "Backspace") {
@@ -207,16 +218,12 @@ const TimelinePanel = ({
     setEditingText("");
   };
 
-  /**
-   * Prompt for a frame number and add it to the block if valid.
-   * Returns true if a frame was added, false otherwise.
-   */
   const promptAddFrame = (animId) => {
     try {
       isPromptOpenRef.current = true;
 
       const raw = window.prompt("Enter frame number to add:");
-      if (raw === null) return false; // cancelled
+      if (raw === null) return false;
 
       const num = parseInt(String(raw).trim(), 10);
       if (!Number.isFinite(num) || num < 1) {
@@ -234,7 +241,6 @@ const TimelinePanel = ({
         return false;
       }
 
-      // valid -> update only the target block
       setAnims((prev) =>
         prev.map((a) => {
           if (a.id !== animId) return a;
@@ -243,7 +249,6 @@ const TimelinePanel = ({
       );
       return true;
     } finally {
-      // release the prompt lock
       isPromptOpenRef.current = false;
     }
   };
@@ -258,12 +263,10 @@ const TimelinePanel = ({
     setSelection({ animId: anim.id, frameNum, _idx: occIdx });
     setSelectedAnimId(anim.id);
   };
-
   const onFrameDragOver = (e) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
   };
-
   const onFrameDropOnChip = (e, targetAnimId, targetFrameNum) => {
     e.preventDefault();
     const info = dragInfo.current;
@@ -286,7 +289,6 @@ const TimelinePanel = ({
       })
     );
   };
-
   const onFrameDropAtEnd = (e, targetAnimId) => {
     e.preventDefault();
     const info = dragInfo.current;
@@ -308,6 +310,17 @@ const TimelinePanel = ({
   };
 
   const transportDisabled = !selectedAnimId;
+
+  // --- (Optional) keep preview fed with sources; parent can update this prop anytime
+  useEffect(() => {
+    previewRef.current?.setFrames?.(previewFrames || []);
+    previewRef.current?.redraw?.();
+  }, [previewFrames]);
+
+  // --- (Optional) expose preview API upward if requested
+  useEffect(() => {
+    if (onRegisterPreviewAPI) onRegisterPreviewAPI(previewRef.current || null);
+  }, [onRegisterPreviewAPI]);
 
   return (
     <div
@@ -336,211 +349,200 @@ const TimelinePanel = ({
             Timeline (collapsed)
           </div>
         ) : (
-          <>
-            {/* Transport */}
-            <div className="w-full flex items-center justify-center">
-              <div className="flex items-center gap-2">
-                {[
-                  {
-                    key: "first",
-                    icon: assets.firstFrameIcon,
-                    title: "Go to first frame",
-                    onClick: () => {},
-                  },
-                  {
-                    key: "prev",
-                    icon: assets.prevFrameIcon,
-                    title: "Go to previous frame",
-                    onClick: () => {},
-                  },
-                  {
-                    key: "play",
-                    icon: isPlaying ? assets.stopIcon : assets.playIcon,
-                    title: isPlaying ? "Stop" : "Play",
-                    onClick: () => setIsPlaying((p) => !p),
-                  },
-                  {
-                    key: "next",
-                    icon: assets.nextFrameIcon,
-                    title: "Go to next frame",
-                    onClick: () => {},
-                  },
-                  {
-                    key: "last",
-                    icon: assets.lastFrameIcon,
-                    title: "Go to last frame",
-                    onClick: () => {},
-                  },
-                ].map((btn) => (
+          // === Two-column grid: left 3/4 timeline, right 1/4 preview ===
+          <div className="grid grid-cols-4 gap-4 items-start">
+            {/* LEFT: 3/4 — existing timeline UI (unchanged logic, just wrapped) */}
+            <div className="col-span-3 min-w-0">
+              {/* Transport */}
+              <div className="w-full flex items-center justify-center">
+                <div className="flex items-center gap-2">
+                  {[
+                    {
+                      key: "first",
+                      icon: assets.firstFrameIcon,
+                      title: "Go to first frame",
+                      onClick: () => {},
+                    },
+                    {
+                      key: "prev",
+                      icon: assets.prevFrameIcon,
+                      title: "Go to previous frame",
+                      onClick: () => {},
+                    },
+                    {
+                      key: "play",
+                      icon: isPlaying ? assets.stopIcon : assets.playIcon,
+                      title: isPlaying ? "Stop" : "Play",
+                      onClick: () => setIsPlaying((p) => !p),
+                    },
+                    {
+                      key: "next",
+                      icon: assets.nextFrameIcon,
+                      title: "Go to next frame",
+                      onClick: () => {},
+                    },
+                    {
+                      key: "last",
+                      icon: assets.lastFrameIcon,
+                      title: "Go to last frame",
+                      onClick: () => {},
+                    },
+                  ].map((btn) => (
+                    <button
+                      key={btn.key}
+                      className={[
+                        "w-8 h-8 rounded border border-[#cfe0f1] bg-white flex items-center justify-center",
+                        transportDisabled
+                          ? "opacity-45 cursor-not-allowed"
+                          : "hover:bg-[#eef6ff]",
+                      ].join(" ")}
+                      title={btn.title}
+                      disabled={transportDisabled}
+                      onClick={() => {
+                        if (transportDisabled) return;
+                        btn.onClick();
+                      }}
+                    >
+                      <img
+                        src={btn.icon}
+                        alt=""
+                        className="w-4 h-4 pointer-events-none"
+                      />
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Controls + animations rail (your original content) */}
+              <div className="mt-3 grid grid-cols-[auto,1fr] gap-4 items-start">
+                <div className="shrink-0">
                   <button
-                    key={btn.key}
-                    className={[
-                      "w-8 h-8 rounded border border-[#cfe0f1] bg-white flex items-center justify-center",
-                      transportDisabled
-                        ? "opacity-45 cursor-not-allowed"
-                        : "hover:bg-[#eef6ff]",
-                    ].join(" ")}
-                    title={btn.title}
-                    disabled={transportDisabled}
-                    onClick={() => {
-                      if (transportDisabled) return;
-                      btn.onClick();
-                    }}
+                    onClick={addAnimation}
+                    className="px-3 py-1.5 rounded-md bg-[#4D9FDC] text-white text-sm hover:bg-[#3e8dcb] transition"
                   >
-                    <img
-                      src={btn.icon}
-                      alt=""
-                      className="w-4 h-4 pointer-events-none"
-                    />
+                    Add animation
                   </button>
-                ))}
-              </div>
-            </div>
+                </div>
 
-            {/* Two columns */}
-            <div className="mt-3 grid grid-cols-[auto,1fr] gap-4 items-start">
-              <div className="shrink-0">
-                <button
-                  onClick={addAnimation}
-                  className="px-3 py-1.5 rounded-md bg-[#4D9FDC] text-white text-sm hover:bg-[#3e8dcb] transition"
-                >
-                  Add animation
-                </button>
-              </div>
-
-              <div className="overflow-x-auto pb-3">
-                <div className="flex gap-4">
-                  {anims.map((anim) => {
-                    const isSelected = selectedAnimId === anim.id;
-                    return (
-                      <div
-                        key={anim.id}
-                        data-anim-card="1"
-                        className={[
-                          "min-w=[320px] max-w-[90vw] bg-white/80 rounded-2xl border border-[#d7e5f3] shadow-sm px-3 py-2 cursor-pointer",
-                          isSelected ? "ring-2 ring-[#4D9FDC]" : "",
-                        ].join(" ")}
-                        onClick={(e) => {
-                          const clickedBtn = e.target.closest("button, input");
-                          if (!clickedBtn) setSelectedAnimId(anim.id);
-                        }}
-                      >
-                        {/* Header */}
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex-1">
-                            {editingId === anim.id ? (
-                              <input
-                                ref={inputRef}
-                                className="w-full bg-white border border-[#cfe0f1] rounded-md px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-[#4D9FDC]"
-                                value={editingText}
-                                onChange={(e) => setEditingText(e.target.value)}
-                                onBlur={commitEditName}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter") commitEditName();
-                                  if (e.key === "Escape") setEditingId(null);
-                                }}
-                                onClick={(e) => e.stopPropagation()}
-                              />
-                            ) : (
-                              <button
-                                data-anim-title="1"
-                                className="text-sm font-medium text-[#3c638c] hover:underline text-left"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  startEditName(anim);
-                                }}
-                                title="Click to rename"
-                              >
-                                {anim.name}
-                              </button>
-                            )}
-                          </div>
-
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <button
-                              data-add-frame="1"
-                              className="px-1.5 py-0.5 text[11px] leading-none rounded-md border border-[#cfe0f1] hover:bg-[#eef6ff] whitespace-nowrap"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                // Only select after a successful add
-                                const added = promptAddFrame(anim.id);
-                                if (added) setSelectedAnimId(anim.id);
-                                // Clear selection to avoid any Delete key side effects
-                                setSelection(null);
-                              }}
-                              title="Add frame by number"
-                            >
-                              Add frame
-                            </button>
-                            <button
-                              data-del-anim="1"
-                              aria-label="Delete animation"
-                              className="w-6 h-6 rounded-md border flex items-center justify-center hover:bg-[#ffe8e8] hover:border-[#ffbdbd]"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                removeAnimation(anim.id);
-                              }}
-                              title="Delete animation"
-                            >
-                              <img
-                                src={assets.Delete}
-                                alt=""
-                                className="w-3.5 h-3.5 pointer-events-none"
-                              />
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Frames row */}
+                <div className="overflow-x-auto pb-3">
+                  <div className="flex gap-4">
+                    {anims.map((anim) => {
+                      const isSelected = selectedAnimId === anim.id;
+                      return (
                         <div
-                          className="mt-2 flex items-center gap-2 overflow-x-auto"
-                          onDragOver={onFrameDragOver}
-                          onDrop={(e) => onFrameDropAtEnd(e, anim.id)}
-                          onClick={() => setSelectedAnimId(anim.id)}
+                          key={anim.id}
+                          data-anim-card="1"
+                          className={[
+                            "min-w=[320px] max-w-[90vw] bg-white/80 rounded-2xl border border-[#d7e5f3] shadow-sm px-3 py-2 cursor-pointer",
+                            isSelected ? "ring-2 ring-[#4D9FDC]" : "",
+                          ].join(" ")}
+                          onClick={(e) => {
+                            const clickedBtn =
+                              e.target.closest("button, input");
+                            if (!clickedBtn) setSelectedAnimId(anim.id);
+                          }}
                         >
-                          {anim.frames.map((n, idx) => {
-                            const isChipSelected =
-                              selection &&
-                              selection.animId === anim.id &&
-                              selection.frameNum === n &&
-                              selection._idx ===
-                                occurrenceIndex(anim.frames, n, idx);
+                          {/* Header */}
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex-1">
+                              {editingId === anim.id ? (
+                                <input
+                                  ref={inputRef}
+                                  className="w-full bg-white border border-[#cfe0f1] rounded-md px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-[#4D9FDC]"
+                                  value={editingText}
+                                  onChange={(e) =>
+                                    setEditingText(e.target.value)
+                                  }
+                                  onBlur={commitEditName}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") commitEditName();
+                                    if (e.key === "Escape") setEditingId(null);
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                              ) : (
+                                <button
+                                  data-anim-title="1"
+                                  className="text-sm font-medium text-[#3c638c] hover:underline text-left"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    startEditName(anim);
+                                  }}
+                                  title="Click to rename"
+                                >
+                                  {anim.name}
+                                </button>
+                              )}
+                            </div>
 
-                            return (
-                              <div
-                                key={`${n}-${idx}`}
-                                data-frame-chip="1"
-                                className={[
-                                  "relative select-none cursor-grab active:cursor-grabbing outline-none",
-                                  isChipSelected
-                                    ? "ring-2 ring-[#4D9FDC] rounded-lg"
-                                    : "",
-                                ].join(" ")}
-                                draggable
-                                onDragStart={(e) =>
-                                  onFrameDragStart(e, anim, n, idx)
-                                }
-                                onDragOver={onFrameDragOver}
-                                onDrop={(e) => onFrameDropOnChip(e, anim.id, n)}
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button
+                                data-add-frame="1"
+                                className="px-1.5 py-0.5 text[11px] leading-none rounded-md border border-[#cfe0f1] hover:bg-[#eef6ff] whitespace-nowrap"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setSelectedAnimId(anim.id);
-                                  const occIdx = occurrenceIndex(
-                                    anim.frames,
-                                    n,
-                                    idx
-                                  );
-                                  setSelection({
-                                    animId: anim.id,
-                                    frameNum: n,
-                                    _idx: occIdx,
-                                  });
+                                  const added = promptAddFrame(anim.id);
+                                  if (added) setSelectedAnimId(anim.id);
+                                  setSelection(null);
                                 }}
-                                title={`Frame ${n} (click to select, Delete to remove)`}
-                                tabIndex={0}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter" || e.key === " ") {
-                                    e.preventDefault();
+                                title="Add frame by number"
+                              >
+                                Add frame
+                              </button>
+                              <button
+                                data-del-anim="1"
+                                aria-label="Delete animation"
+                                className="w-6 h-6 rounded-md border flex items-center justify-center hover:bg-[#ffe8e8] hover:border-[#ffbdbd]"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  removeAnimation(anim.id);
+                                }}
+                                title="Delete animation"
+                              >
+                                <img
+                                  src={assets.Delete}
+                                  alt=""
+                                  className="w-3.5 h-3.5 pointer-events-none"
+                                />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Frames row */}
+                          <div
+                            className="mt-2 flex items-center gap-2 overflow-x-auto"
+                            onDragOver={onFrameDragOver}
+                            onDrop={(e) => onFrameDropAtEnd(e, anim.id)}
+                            onClick={() => setSelectedAnimId(anim.id)}
+                          >
+                            {anim.frames.map((n, idx) => {
+                              const isChipSelected =
+                                selection &&
+                                selection.animId === anim.id &&
+                                selection.frameNum === n &&
+                                selection._idx ===
+                                  occurrenceIndex(anim.frames, n, idx);
+
+                              return (
+                                <div
+                                  key={`${n}-${idx}`}
+                                  data-frame-chip="1"
+                                  className={[
+                                    "relative select-none cursor-grab active:cursor-grabbing outline-none",
+                                    isChipSelected
+                                      ? "ring-2 ring-[#4D9FDC] rounded-lg"
+                                      : "",
+                                  ].join(" ")}
+                                  draggable
+                                  onDragStart={(e) =>
+                                    onFrameDragStart(e, anim, n, idx)
+                                  }
+                                  onDragOver={onFrameDragOver}
+                                  onDrop={(e) =>
+                                    onFrameDropOnChip(e, anim.id, n)
+                                  }
+                                  onClick={(e) => {
+                                    e.stopPropagation();
                                     setSelectedAnimId(anim.id);
                                     const occIdx = occurrenceIndex(
                                       anim.frames,
@@ -552,24 +554,62 @@ const TimelinePanel = ({
                                       frameNum: n,
                                       _idx: occIdx,
                                     });
-                                  }
-                                }}
-                              >
-                                <div className="w-10 h-10 rounded-lg border border-[#cfe0f1] bg-white flex items-center justify-center text-sm text-[#3c638c] shadow-xs">
-                                  {n}
+                                  }}
+                                  title={`Frame ${n} (click to select, Delete to remove)`}
+                                  tabIndex={0}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter" || e.key === " ") {
+                                      e.preventDefault();
+                                      setSelectedAnimId(anim.id);
+                                      const occIdx = occurrenceIndex(
+                                        anim.frames,
+                                        n,
+                                        idx
+                                      );
+                                      setSelection({
+                                        animId: anim.id,
+                                        frameNum: n,
+                                        _idx: occIdx,
+                                      });
+                                    }
+                                  }}
+                                >
+                                  <div className="w-10 h-10 rounded-lg border border-[#cfe0f1] bg-white flex items-center justify-center text-sm text-[#3c638c] shadow-xs">
+                                    {n}
+                                  </div>
                                 </div>
-                              </div>
-                            );
-                          })}
-                          <div className="w-6 h-10" />
+                              );
+                            })}
+                            <div className="w-6 h-10" />
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             </div>
-          </>
+
+            {/* RIGHT: 1/4 — Preview window (display-only, onion skin capable) */}
+            <div className="col-span-1 min-w-0">
+              <PreviewWindow
+                ref={previewRef}
+                frames={previewFrames}
+                width={previewWidth}
+                height={previewHeight}
+                title="Preview"
+                onion={{
+                  enabled: true,
+                  prev: 2,
+                  next: 2,
+                  fade: 0.5,
+                  mode: "tint",
+                }}
+                className="w-full"
+                onRegisterPreviewAPI={onRegisterPreviewAPI}
+              />
+            </div>
+          </div>
         )}
       </div>
     </div>

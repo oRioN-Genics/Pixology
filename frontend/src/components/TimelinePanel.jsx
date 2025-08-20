@@ -15,6 +15,9 @@ const nextLoopMode = (m) => {
 
 const DEFAULT_FPS = 8;
 
+// ***** FIXED PREVIEW VIEWPORT SIZE *****
+const PREVIEW_SIZE = 160;
+
 const TimelinePanel = ({
   className = "",
   framesCount = 0,
@@ -22,13 +25,13 @@ const TimelinePanel = ({
   initialAnimations = [],
   onExposeTimelineAPI,
 
-  // preview props (provided from CanvasBoard)
+  // supplied from CanvasBoard (not used for viewport sizing anymore)
   previewFrames = [],
   previewWidth = 128,
   previewHeight = 128,
   onRegisterPreviewAPI,
 }) => {
-  const [anims, setAnims] = useState([]); // [{id, name, frames:number[], loopMode?}]
+  const [anims, setAnims] = useState([]);
   const animsRef = useRef(anims);
   useEffect(() => {
     animsRef.current = anims;
@@ -129,9 +132,7 @@ const TimelinePanel = ({
 
   const occurrenceIndex = (frames, n, idx) => {
     let count = 0;
-    for (let i = 0; i <= idx; i++) {
-      if (frames[i] === n) count++;
-    }
+    for (let i = 0; i <= idx; i++) if (frames[i] === n) count++;
     return count - 1;
   };
 
@@ -219,7 +220,6 @@ const TimelinePanel = ({
   const promptAddFrame = (animId) => {
     try {
       isPromptOpenRef.current = true;
-
       const raw = window.prompt("Enter frame number to add:");
       if (raw === null) return false;
 
@@ -240,10 +240,9 @@ const TimelinePanel = ({
       }
 
       setAnims((prev) =>
-        prev.map((a) => {
-          if (a.id !== animId) return a;
-          return { ...a, frames: [...a.frames, num] };
-        })
+        prev.map((a) =>
+          a.id !== animId ? a : { ...a, frames: [...a.frames, num] }
+        )
       );
       return true;
     } finally {
@@ -260,41 +259,34 @@ const TimelinePanel = ({
     setSelection({ animId: anim.id, frameNum, _idx: occIdx });
     setSelectedAnimId(anim.id);
   };
-
   const onFrameDragOver = (e) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
   };
-
   const onFrameDropOnChip = (e, targetAnimId, targetFrameNum) => {
     e.preventDefault();
     const info = dragInfo.current;
     dragInfo.current = null;
-    if (!info) return;
-    if (info.animId !== targetAnimId) return;
+    if (!info || info.animId !== targetAnimId) return;
 
     setAnims((prev) =>
       prev.map((a) => {
         if (a.id !== targetAnimId) return a;
-
         const cur = a.frames.slice();
         const fromIdx = cur.indexOf(info.frameNum);
         const toIdx = cur.indexOf(targetFrameNum);
         if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return a;
-
         const [moved] = cur.splice(fromIdx, 1);
         cur.splice(toIdx, 0, moved);
         return { ...a, frames: cur };
       })
     );
   };
-
   const onFrameDropAtEnd = (e, targetAnimId) => {
     e.preventDefault();
     const info = dragInfo.current;
     dragInfo.current = null;
-    if (!info) return;
-    if (info.animId !== targetAnimId) return;
+    if (!info || info.animId !== targetAnimId) return;
 
     setAnims((prev) =>
       prev.map((a) => {
@@ -309,8 +301,6 @@ const TimelinePanel = ({
     );
   };
 
-  const transportDisabled = !selectedAnimId;
-
   const toggleLoopMode = (animId) => {
     setAnims((prev) =>
       prev.map((a) => {
@@ -321,13 +311,12 @@ const TimelinePanel = ({
     );
   };
 
-  // FEED PREVIEW:
   // Only feed frames when a block is selected; otherwise clear it.
   useEffect(() => {
     if (!previewRef.current) return;
     if (!selectedAnimId) {
       previewRef.current.setFrames([]);
-      previewRef.current.redraw?.(); // clears
+      previewRef.current.redraw?.();
       return;
     }
     previewRef.current.setFrames(previewFrames || []);
@@ -347,13 +336,11 @@ const TimelinePanel = ({
         .map((n) => (Number.isFinite(n) ? n | 0 : 0))
         .map((n) => n - 1)
         .filter((i) => i >= 0 && i < totalFrames);
-
       if (!base.length) return [];
 
       const mode = anim.loopMode || "forward";
       if (mode === "forward") return base;
       if (mode === "backward") return [...base].reverse();
-
       if (base.length === 1) return base;
       const head = base;
       const tail = [...base].slice(1, -1).reverse();
@@ -388,12 +375,10 @@ const TimelinePanel = ({
 
   useEffect(() => {
     ensureSequence();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedAnimId, anims, previewFrames]);
 
   useEffect(() => {
     stopPlayback();
-
     if (!isPlaying) return;
 
     const seq = ensureSequence();
@@ -418,12 +403,10 @@ const TimelinePanel = ({
     }, interval);
 
     return stopPlayback;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPlaying, fps]);
 
   useEffect(() => stopPlayback, []);
 
-  // Transport (first/prev/next/last)
   const goFirst = () => {
     const seq = ensureSequence();
     if (!seq.length) return;
@@ -746,20 +729,19 @@ const TimelinePanel = ({
               </div>
             </div>
 
-            {/* RIGHT: Preview */}
+            {/* RIGHT: Preview (FIXED SIZE) */}
             <div className="col-span-1 min-w-0">
               <PreviewWindow
                 ref={previewRef}
-                frames={[]} // actual frames fed via effect above based on selection
-                width={previewWidth}
-                height={previewHeight}
+                frames={[]} // frames fed via effect when selected
+                width={PREVIEW_SIZE} // <-- fixed viewport width
+                height={PREVIEW_SIZE} // <-- fixed viewport height
                 title="Preview"
-                // onion-skin OFF by default (only the current frame is shown)
-                onion={{ enabled: false }}
-                displayScale={8}
+                onion={{ enabled: false }} // show only current frame
+                displayScale={1} // no extra scaling
                 fps={fps}
                 onFpsChange={(v) => setFps(Math.max(1, Math.min(120, v | 0)))}
-                className="w-full"
+                className="" // don't stretch
                 onRegisterPreviewAPI={onRegisterPreviewAPI}
               />
             </div>

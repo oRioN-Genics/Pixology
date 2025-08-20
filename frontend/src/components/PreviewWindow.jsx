@@ -15,7 +15,7 @@ const PreviewWindow = forwardRef(
       height = 128,
       pixelPerfect = true,
       onion = {
-        enabled: false, // <-- OFF by default
+        enabled: false,
         prev: 0,
         next: 0,
         fade: 0.5,
@@ -26,8 +26,7 @@ const PreviewWindow = forwardRef(
       title = "Preview",
       className = "",
       onRegisterPreviewAPI,
-
-      displayScale = 6,
+      displayScale = 1, // <-- keep 1 so the outer size is fixed
       fps,
       onFpsChange,
     },
@@ -39,7 +38,6 @@ const PreviewWindow = forwardRef(
 
     useEffect(() => {
       setSources(frames || []);
-      // reset index when sources change
       setCurrent(0);
     }, [frames]);
 
@@ -68,12 +66,14 @@ const PreviewWindow = forwardRef(
       ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
 
       if (typeof item === "function") {
+        // Functions (from CanvasBoard) already scale the grid to fit width/height.
         item(ctx, width, height);
       } else if (
         item instanceof HTMLCanvasElement ||
         (typeof ImageBitmap !== "undefined" && item instanceof ImageBitmap) ||
         item instanceof HTMLImageElement
       ) {
+        // Bitmaps: draw stretched to the viewport
         ctx.drawImage(item, 0, 0, width, height);
       }
 
@@ -92,12 +92,9 @@ const PreviewWindow = forwardRef(
       const ctx = cvs.getContext("2d");
       if (!ctx) return;
 
-      // clear canvas
       ctx.clearRect(0, 0, cvs.width, cvs.height);
+      if (!frameCount) return;
 
-      if (!frameCount) return; // nothing to draw
-
-      // prev ghosts
       if (cfg.enabled && cfg.prev > 0) {
         for (let i = cfg.prev; i >= 1; i--) {
           const idx = (index - i + frameCount) % frameCount;
@@ -108,10 +105,8 @@ const PreviewWindow = forwardRef(
         }
       }
 
-      // current
       drawOne(ctx, sources[index], 1, null);
 
-      // next ghosts
       if (cfg.enabled && cfg.next > 0) {
         for (let i = 1; i <= cfg.next; i++) {
           const idx = (index + i) % frameCount;
@@ -128,7 +123,6 @@ const PreviewWindow = forwardRef(
       if (!cvs) return;
       cvs.width = width;
       cvs.height = height;
-      // redraw on size change
       drawComposite(
         ((current % Math.max(1, frameCount)) + Math.max(1, frameCount)) %
           Math.max(1, frameCount)
@@ -187,11 +181,9 @@ const PreviewWindow = forwardRef(
     );
 
     useImperativeHandle(ref, () => api, [api]);
-
     useEffect(() => {
       onRegisterPreviewAPI?.(api);
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [api]);
+    }, [api]); // eslint-disable-line
 
     const scale = Math.max(1, displayScale | 0);
 
@@ -232,13 +224,13 @@ const PreviewWindow = forwardRef(
           )}
         </div>
 
-        {/* Content */}
+        {/* Checkerboard viewport */}
         <div className="p-2 bg-[#f5f0f7]">
           <div className="mx-auto max-w-max border-2 border-[#cfe0f1] bg-white">
             <div
               className="relative"
               style={{
-                width: width * scale,
+                width: width * scale, // outer size stays fixed
                 height: height * scale,
                 backgroundSize: "16px 16px",
                 backgroundImage:

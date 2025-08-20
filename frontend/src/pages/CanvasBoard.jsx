@@ -57,6 +57,9 @@ const CanvasBoard = () => {
     [initialTimelineAnims]
   );
 
+  // ===== Preview frames for Timeline (built from rail frames) =====
+  const [animPreviewFrames, setAnimPreviewFrames] = useState([]);
+
   // Pixel canvas API
   const pixelApiRef = useRef({});
 
@@ -406,7 +409,7 @@ const CanvasBoard = () => {
         id: a.id,
         name: a.name,
         frames: a.frames || [],
-        loopMode: a.loopMode || "forward", // <-- FIX: include loopMode
+        loopMode: a.loopMode || "forward",
       })),
       previewPng: snap.previewPng || null,
       favorite: false,
@@ -563,7 +566,81 @@ const CanvasBoard = () => {
       api.loadFromAnimationSnapshot?.(pendingAnimSnapshotRef.current);
       pendingAnimSnapshotRef.current = null;
     }
+    // Build initial preview frames when rail is ready
+    rebuildAnimPreviewFrames();
   };
+
+  // ===== Build preview frames for Timeline/Preview (transparent background) =====
+  const renderLayersToCtx = (ctx, layersArr, w, h, dx, dy, scale, opaqueBG) => {
+    if (opaqueBG) {
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(dx, dy, w * scale, h * scale);
+    }
+    const ordered = [...(layersArr || [])].reverse();
+    for (const ly of ordered) {
+      if (ly.visible === false) continue;
+      const px = ly.pixels || [];
+      for (let r = 0; r < h; r++) {
+        const row = px[r] || [];
+        for (let c = 0; c < w; c++) {
+          const hex = row[c];
+          if (!hex) continue;
+          ctx.fillStyle = hex;
+          ctx.fillRect(dx + c * scale, dy + r * scale, scale, scale);
+        }
+      }
+    }
+  };
+
+  const rebuildAnimPreviewFrames = () => {
+    const rail = animRailApiRef.current;
+    if (!rail?.collectAnimationSnapshot) return;
+
+    const snap = rail.collectAnimationSnapshot();
+    const frames = Array.isArray(snap?.frames) ? snap.frames : [];
+
+    // Build an array of draw functions (transparent background)
+    const fns = frames.map((f) => {
+      const layersArr = f.layers || [];
+      return (ctx, previewW, previewH) => {
+        // scale-to-fit (keeps old behaviour if previewW/H === width/height)
+        const scaleX = previewW / width;
+        const scaleY = previewH / height;
+        const scale = Math.min(scaleX, scaleY) || 1;
+
+        // optional centering if preview is larger than logical grid
+        const dx = Math.max(0, Math.floor((previewW - width * scale) / 2));
+        const dy = Math.max(0, Math.floor((previewH - height * scale) / 2));
+
+        renderLayersToCtx(
+          ctx,
+          layersArr,
+          width,
+          height,
+          dx,
+          dy,
+          scale,
+          false // transparent background
+        );
+      };
+    });
+
+    setAnimPreviewFrames(fns);
+  };
+
+  // Rebuild preview frames when the count or canvas size changes
+  useEffect(() => {
+    if (mode !== "animations") return;
+    rebuildAnimPreviewFrames();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [framesCount, width, height, mode]);
+
+  // Also rebuild when active frame's layers meta changes (best-effort trigger)
+  useEffect(() => {
+    if (mode !== "animations") return;
+    rebuildAnimPreviewFrames();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [animLayers, animSelectedLayerId, mode]);
 
   // ---------- EXPORT ----------
   const renderSnapshotToDataURL = (
@@ -606,27 +683,6 @@ const CanvasBoard = () => {
       : cvs.toDataURL("image/png");
   };
 
-  const renderLayersToCtx = (ctx, layersArr, w, h, dx, dy, scale, opaqueBG) => {
-    if (opaqueBG) {
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(dx, dy, w * scale, h * scale);
-    }
-    const ordered = [...(layersArr || [])].reverse();
-    for (const ly of ordered) {
-      if (ly.visible === false) continue;
-      const px = ly.pixels || [];
-      for (let r = 0; r < h; r++) {
-        const row = px[r] || [];
-        for (let c = 0; c < w; c++) {
-          const hex = row[c];
-          if (!hex) continue;
-          ctx.fillStyle = hex;
-          ctx.fillRect(dx + c * scale, dy + r * scale, scale, scale);
-        }
-      }
-    }
-  };
-
   const renderSpriteSheetDataURL = (
     animSnap,
     format = "png",
@@ -663,7 +719,22 @@ const CanvasBoard = () => {
       const r = Math.floor(i / cols);
       const dx = c * w * scale;
       const dy = r * h * scale;
-      renderLayersToCtx(ctx, f.layers, w, h, dx, dy, scale, false);
+
+      // draw one frame
+      const ordered = [...(f.layers || [])].reverse();
+      for (const ly of ordered) {
+        if (ly.visible === false) continue;
+        const px = ly.pixels || [];
+        for (let rr = 0; rr < h; rr++) {
+          const row = px[rr] || [];
+          for (let cc = 0; cc < w; cc++) {
+            const hex = row[cc];
+            if (!hex) continue;
+            ctx.fillStyle = hex;
+            ctx.fillRect(dx + cc * scale, dy + rr * scale, scale, scale);
+          }
+        }
+      }
     });
 
     return format === "jpeg"
@@ -674,7 +745,7 @@ const CanvasBoard = () => {
   const triggerDownload = (dataUrl, fmt, extra = "") => {
     if (!dataUrl) return setToastMsg("Failed to export image.");
     const safeName =
-      (projectName || "pixology").replace(/[^\w.-]+/g, "_").slice(0, 60) ||
+      (projectName || "pixology").replace(/[^\w\.-]+/g, "_").slice(0, 60) ||
       "pixology";
     const ext = fmt === "jpeg" ? "jpg" : "png";
 
@@ -899,6 +970,10 @@ const CanvasBoard = () => {
           framesCount={framesCount}
           onToast={(msg) => setToastMsg(msg)}
           initialAnimations={memoInitialTimelineAnims}
+          // supply rendered frame functions to Preview (transparent background)
+          previewFrames={animPreviewFrames}
+          previewWidth={width}
+          previewHeight={height}
           onExposeTimelineAPI={(api) => {
             timelineApiRef.current = api || null;
             if (

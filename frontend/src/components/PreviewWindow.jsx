@@ -1,4 +1,3 @@
-// components/PreviewWindow.jsx
 import React, {
   forwardRef,
   useEffect,
@@ -16,17 +15,21 @@ const PreviewWindow = forwardRef(
       height = 128,
       pixelPerfect = true,
       onion = {
-        enabled: true,
-        prev: 2,
-        next: 2,
+        enabled: false, // <-- OFF by default
+        prev: 0,
+        next: 0,
         fade: 0.5,
-        mode: "alpha", // "alpha" | "tint"
+        mode: "alpha",
         prevTint: "rgba(255,80,80,0.35)",
         nextTint: "rgba(80,255,120,0.35)",
       },
       title = "Preview",
       className = "",
       onRegisterPreviewAPI,
+
+      displayScale = 6,
+      fps,
+      onFpsChange,
     },
     ref
   ) => {
@@ -34,17 +37,18 @@ const PreviewWindow = forwardRef(
     const [sources, setSources] = useState(frames);
     const canvasRef = useRef(null);
 
-    // keep in sync if the prop changes (non-breaking; still ok to use setFrames from parent)
     useEffect(() => {
       setSources(frames || []);
+      // reset index when sources change
+      setCurrent(0);
     }, [frames]);
 
     const frameCount = sources?.length ?? 0;
     const cfg = useMemo(
       () => ({
-        enabled: true,
-        prev: 2,
-        next: 2,
+        enabled: false,
+        prev: 0,
+        next: 0,
         fade: 0.5,
         mode: "alpha",
         prevTint: "rgba(255,80,80,0.35)",
@@ -84,11 +88,14 @@ const PreviewWindow = forwardRef(
 
     const drawComposite = (index) => {
       const cvs = canvasRef.current;
-      if (!cvs || !frameCount) return;
+      if (!cvs) return;
       const ctx = cvs.getContext("2d");
       if (!ctx) return;
 
+      // clear canvas
       ctx.clearRect(0, 0, cvs.width, cvs.height);
+
+      if (!frameCount) return; // nothing to draw
 
       // prev ghosts
       if (cfg.enabled && cfg.prev > 0) {
@@ -117,6 +124,19 @@ const PreviewWindow = forwardRef(
     };
 
     useEffect(() => {
+      const cvs = canvasRef.current;
+      if (!cvs) return;
+      cvs.width = width;
+      cvs.height = height;
+      // redraw on size change
+      drawComposite(
+        ((current % Math.max(1, frameCount)) + Math.max(1, frameCount)) %
+          Math.max(1, frameCount)
+      );
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [width, height]);
+
+    useEffect(() => {
       if (!frameCount) {
         const ctx = canvasRef.current?.getContext("2d");
         if (ctx) ctx.clearRect(0, 0, width, height);
@@ -125,7 +145,7 @@ const PreviewWindow = forwardRef(
       const clamped = ((current % frameCount) + frameCount) % frameCount;
       drawComposite(clamped);
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [current, sources, frameCount, width, height, pixelPerfect, cfg]);
+    }, [current, sources, frameCount, cfg]);
 
     const api = useMemo(
       () => ({
@@ -167,40 +187,59 @@ const PreviewWindow = forwardRef(
     );
 
     useImperativeHandle(ref, () => api, [api]);
+
     useEffect(() => {
       onRegisterPreviewAPI?.(api);
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [api]);
 
-    useEffect(() => {
-      const cvs = canvasRef.current;
-      if (!cvs) return;
-      cvs.width = width;
-      cvs.height = height;
-    }, [width, height]);
+    const scale = Math.max(1, displayScale | 0);
 
     return (
       <div
         className={[
-          // light theme container
           "rounded-xl bg-white border border-[#d7e5f3] shadow-sm",
           "ring-1 ring-black/5 overflow-hidden select-none",
           className,
         ].join(" ")}
       >
-        {/* Light title bar with only the title */}
-        <div className="h-8 px-3 flex items-center bg-[#eaf4ff] text-[#2b4a6a] border-b border-[#d7e5f3]">
+        {/* Title bar with FPS box on the right */}
+        <div className="h-9 px-3 flex items-center justify-between bg-[#eaf4ff] text-[#2b4a6a] border-b border-[#d7e5f3]">
           <span className="text-sm font-semibold">{title}</span>
+
+          {typeof fps !== "undefined" && onFpsChange && (
+            <div className="flex items-center gap-2">
+              <label className="text-xs opacity-80" htmlFor="preview-fps-input">
+                FPS
+              </label>
+              <input
+                id="preview-fps-input"
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={120}
+                value={fps}
+                onChange={(e) => {
+                  const n = parseInt(e.target.value || "0", 10);
+                  onFpsChange(
+                    Number.isFinite(n) ? Math.max(1, Math.min(120, n)) : 1
+                  );
+                }}
+                className="w-16 h-7 rounded-md border border-[#cfe0f1] bg-white px-2 text-sm text-[#2b4a6a] outline-none focus:ring-2 focus:ring-[#4D9FDC]"
+                title="Playback frames per second"
+              />
+            </div>
+          )}
         </div>
 
-        {/* Content: light gutter + checkerboard center */}
+        {/* Content */}
         <div className="p-2 bg-[#f5f0f7]">
           <div className="mx-auto max-w-max border-2 border-[#cfe0f1] bg-white">
             <div
               className="relative"
               style={{
-                width,
-                height,
+                width: width * scale,
+                height: height * scale,
                 backgroundSize: "16px 16px",
                 backgroundImage:
                   "linear-gradient(45deg, #cfcfcf 25%, transparent 25%)," +

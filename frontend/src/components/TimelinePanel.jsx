@@ -1,5 +1,4 @@
-// TimelinePanel.jsx
-import React, { useRef, useState, useEffect } from "react";
+import React, { useRef, useState, useEffect, useMemo } from "react";
 import { assets } from "../assets";
 import PreviewWindow from "../components/PreviewWindow";
 
@@ -8,12 +7,13 @@ const makeId = (p = "anim") =>
     .toString(36)
     .slice(-4)}`;
 
-// loop mode helpers
 const LOOP_MODES = ["forward", "backward", "pingpong"];
 const nextLoopMode = (m) => {
   const i = LOOP_MODES.indexOf(m);
   return LOOP_MODES[(i + 1) % LOOP_MODES.length];
 };
+
+const DEFAULT_FPS = 8;
 
 const TimelinePanel = ({
   className = "",
@@ -22,11 +22,11 @@ const TimelinePanel = ({
   initialAnimations = [],
   onExposeTimelineAPI,
 
-  // preview props
+  // preview props (provided from CanvasBoard)
   previewFrames = [],
   previewWidth = 128,
   previewHeight = 128,
-  onRegisterPreviewAPI, // optional passthrough if parent wants the preview API too
+  onRegisterPreviewAPI,
 }) => {
   const [anims, setAnims] = useState([]); // [{id, name, frames:number[], loopMode?}]
   const animsRef = useRef(anims);
@@ -38,25 +38,18 @@ const TimelinePanel = ({
   const [selectedAnimId, setSelectedAnimId] = useState(null);
   const [collapsed, setCollapsed] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [fps, setFps] = useState(DEFAULT_FPS);
 
-  // Editing state (animation title)
   const [editingId, setEditingId] = useState(null);
   const [editingText, setEditingText] = useState("");
   const inputRef = useRef(null);
 
-  // Drag state
-  const dragInfo = useRef(null); // { animId, frameNum }
-
-  // Single-frame selection: {animId, frameNum, _idx}
+  const dragInfo = useRef(null);
   const [selection, setSelection] = useState(null);
-
-  // Track if a blocking prompt is open
   const isPromptOpenRef = useRef(false);
 
-  // preview ref
   const previewRef = useRef(null);
 
-  // ---------- seed from parent when provided (guarded) ----------
   const didSeedRef = useRef(false);
   useEffect(() => {
     if (didSeedRef.current) return;
@@ -66,11 +59,10 @@ const TimelinePanel = ({
       id: a.id || makeId(),
       name: a.name || "untitled animation",
       frames: Array.isArray(a.frames) ? a.frames.slice() : [],
-      loopMode: a.loopMode || "forward", // NEW
+      loopMode: a.loopMode || "forward",
     }));
     setAnims(seeded);
 
-    // compute next untitled index
     const untitledNums = seeded
       .map((a) => a.name?.match(/^untitled animation\s+(\d+)$/i)?.[1])
       .filter(Boolean)
@@ -82,37 +74,38 @@ const TimelinePanel = ({
     didSeedRef.current = true;
   }, [initialAnimations]);
 
-  // ---------- expose API to parent (collect & load) ----------
   useEffect(() => {
-    if (!onExposeTimelineAPI) return;
-    const api = {
-      collectTimelineSnapshot: () =>
-        (animsRef.current || []).map((a) => ({
-          id: a.id,
-          name: a.name,
-          frames: a.frames.slice(),
-          loopMode: a.loopMode || "forward", // NEW
-        })),
-      loadFromTimelineSnapshot: (arr) => {
-        const next = (Array.isArray(arr) ? arr : []).map((a) => ({
-          id: a.id || makeId(),
-          name: a.name || "untitled animation",
-          frames: Array.isArray(a.frames) ? a.frames.slice() : [],
-          loopMode: a.loopMode || "forward", // NEW
-        }));
-        setAnims(next);
+    if (onExposeTimelineAPI) {
+      const api = {
+        collectTimelineSnapshot: () =>
+          (animsRef.current || []).map((a) => ({
+            id: a.id,
+            name: a.name,
+            frames: a.frames.slice(),
+            loopMode: a.loopMode || "forward",
+          })),
+        loadFromTimelineSnapshot: (arr) => {
+          const next = (Array.isArray(arr) ? arr : []).map((a) => ({
+            id: a.id || makeId(),
+            name: a.name || "untitled animation",
+            frames: Array.isArray(a.frames) ? a.frames.slice() : [],
+            loopMode: a.loopMode || "forward",
+          }));
+          setAnims(next);
 
-        const untitledNums = next
-          .map((a) => a.name?.match(/^untitled animation\s+(\d+)$/i)?.[1])
-          .filter(Boolean)
-          .map((s) => parseInt(s, 10))
-          .filter((n) => Number.isFinite(n));
-        setUntitledIdx(untitledNums.length ? Math.max(...untitledNums) + 1 : 1);
-      },
-      // (Optional) let parent reach the preview directly
-      getPreviewAPI: () => previewRef.current || null,
-    };
-    onExposeTimelineAPI(api);
+          const untitledNums = next
+            .map((a) => a.name?.match(/^untitled animation\s+(\d+)$/i)?.[1])
+            .filter(Boolean)
+            .map((s) => parseInt(s, 10))
+            .filter((n) => Number.isFinite(n));
+          setUntitledIdx(
+            untitledNums.length ? Math.max(...untitledNums) + 1 : 1
+          );
+        },
+        getPreviewAPI: () => previewRef.current || null,
+      };
+      onExposeTimelineAPI(api);
+    }
   }, [onExposeTimelineAPI]);
 
   useEffect(() => {
@@ -126,7 +119,6 @@ const TimelinePanel = ({
     if (!selectedAnimId && isPlaying) setIsPlaying(false);
   }, [selectedAnimId, isPlaying]);
 
-  // reset untitled counter when all blocks are removed
   useEffect(() => {
     if (anims.length === 0) {
       setUntitledIdx(1);
@@ -135,20 +127,17 @@ const TimelinePanel = ({
     }
   }, [anims.length]);
 
-  // --- helper: compute occurrence index among equal numbers up to idx ---
   const occurrenceIndex = (frames, n, idx) => {
     let count = 0;
     for (let i = 0; i <= idx; i++) {
       if (frames[i] === n) count++;
     }
-    return count - 1; // zero-based
+    return count - 1;
   };
 
-  // Global Delete to remove selected frame
   useEffect(() => {
     const onKey = (e) => {
       if (isPromptOpenRef.current) return;
-
       if (editingId) return;
       if (!selection) return;
 
@@ -198,7 +187,7 @@ const TimelinePanel = ({
     setUntitledIdx((i) => i + 1);
     setAnims((prev) => [
       ...prev,
-      { id, name, frames: [], loopMode: "forward" }, // NEW
+      { id, name, frames: [], loopMode: "forward" },
     ]);
   };
 
@@ -208,12 +197,8 @@ const TimelinePanel = ({
       setEditingId(null);
       setEditingText("");
     }
-    if (selection?.animId === animId) {
-      setSelection(null);
-    }
-    if (selectedAnimId === animId) {
-      setSelectedAnimId(null);
-    }
+    if (selection?.animId === animId) setSelection(null);
+    if (selectedAnimId === animId) setSelectedAnimId(null);
   };
 
   const startEditName = (anim) => {
@@ -231,16 +216,12 @@ const TimelinePanel = ({
     setEditingText("");
   };
 
-  /**
-   * Prompt for a frame number and add it to the block if valid.
-   * Returns true if a frame was added, false otherwise.
-   */
   const promptAddFrame = (animId) => {
     try {
       isPromptOpenRef.current = true;
 
       const raw = window.prompt("Enter frame number to add:");
-      if (raw === null) return false; // cancelled
+      if (raw === null) return false;
 
       const num = parseInt(String(raw).trim(), 10);
       if (!Number.isFinite(num) || num < 1) {
@@ -258,7 +239,6 @@ const TimelinePanel = ({
         return false;
       }
 
-      // valid -> update only the target block
       setAnims((prev) =>
         prev.map((a) => {
           if (a.id !== animId) return a;
@@ -267,12 +247,10 @@ const TimelinePanel = ({
       );
       return true;
     } finally {
-      // release the prompt lock
       isPromptOpenRef.current = false;
     }
   };
 
-  // Drag logic (reorder within the same animation)
   const onFrameDragStart = (e, anim, frameNum, idxInArray) => {
     dragInfo.current = { animId: anim.id, frameNum };
     e.dataTransfer.setData("text/plain", `${anim.id}:${frameNum}`);
@@ -333,7 +311,6 @@ const TimelinePanel = ({
 
   const transportDisabled = !selectedAnimId;
 
-  // NEW: loop mode toggle
   const toggleLoopMode = (animId) => {
     setAnims((prev) =>
       prev.map((a) => {
@@ -344,16 +321,137 @@ const TimelinePanel = ({
     );
   };
 
-  // --- (Optional) keep preview fed with sources; parent can update this prop anytime
+  // FEED PREVIEW:
+  // Only feed frames when a block is selected; otherwise clear it.
   useEffect(() => {
-    previewRef.current?.setFrames?.(previewFrames || []);
-    previewRef.current?.redraw?.();
-  }, [previewFrames]);
+    if (!previewRef.current) return;
+    if (!selectedAnimId) {
+      previewRef.current.setFrames([]);
+      previewRef.current.redraw?.(); // clears
+      return;
+    }
+    previewRef.current.setFrames(previewFrames || []);
+    previewRef.current.redraw?.();
+  }, [previewFrames, selectedAnimId]);
 
-  // --- (Optional) expose preview API upward if requested
   useEffect(() => {
     if (onRegisterPreviewAPI) onRegisterPreviewAPI(previewRef.current || null);
   }, [onRegisterPreviewAPI]);
+
+  // ===== PLAY/STOP =====
+  const buildPlaySequence = useMemo(() => {
+    return (anim, totalFrames) => {
+      if (!anim) return [];
+      const nums = Array.isArray(anim.frames) ? anim.frames : [];
+      const base = nums
+        .map((n) => (Number.isFinite(n) ? n | 0 : 0))
+        .map((n) => n - 1)
+        .filter((i) => i >= 0 && i < totalFrames);
+
+      if (!base.length) return [];
+
+      const mode = anim.loopMode || "forward";
+      if (mode === "forward") return base;
+      if (mode === "backward") return [...base].reverse();
+
+      if (base.length === 1) return base;
+      const head = base;
+      const tail = [...base].slice(1, -1).reverse();
+      return [...head, ...tail];
+    };
+  }, []);
+
+  const playTimerRef = useRef(null);
+  const playSeqRef = useRef([]);
+  const playPosRef = useRef(0);
+
+  const stopPlayback = () => {
+    if (playTimerRef.current) {
+      clearInterval(playTimerRef.current);
+      playTimerRef.current = null;
+    }
+  };
+
+  const ensureSequence = () => {
+    const anim = anims.find((a) => a.id === selectedAnimId);
+    const total = previewRef.current?.count ?? (previewFrames?.length || 0);
+    const seq = buildPlaySequence(anim, total);
+    playSeqRef.current = seq;
+    if (seq.length > 0) {
+      playPosRef.current = Math.min(playPosRef.current, seq.length - 1);
+      const idx = playSeqRef.current[playPosRef.current] ?? 0;
+      previewRef.current?.seek?.(idx);
+      previewRef.current?.redraw?.();
+    }
+    return seq;
+  };
+
+  useEffect(() => {
+    ensureSequence();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedAnimId, anims, previewFrames]);
+
+  useEffect(() => {
+    stopPlayback();
+
+    if (!isPlaying) return;
+
+    const seq = ensureSequence();
+    if (!seq.length) {
+      onToast("No frames in the selected animation.");
+      setIsPlaying(false);
+      return;
+    }
+
+    const useFps = Math.max(1, Number.isFinite(fps) ? fps : DEFAULT_FPS);
+    const interval = Math.max(1, Math.round(1000 / useFps));
+
+    previewRef.current?.seek?.(seq[playPosRef.current] ?? 0);
+    previewRef.current?.redraw?.();
+
+    playTimerRef.current = setInterval(() => {
+      const l = seq.length;
+      playPosRef.current = (playPosRef.current + 1) % l;
+      const globalIndex = seq[playPosRef.current] ?? 0;
+      previewRef.current?.seek?.(globalIndex);
+      previewRef.current?.redraw?.();
+    }, interval);
+
+    return stopPlayback;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlaying, fps]);
+
+  useEffect(() => stopPlayback, []);
+
+  // Transport (first/prev/next/last)
+  const goFirst = () => {
+    const seq = ensureSequence();
+    if (!seq.length) return;
+    playPosRef.current = 0;
+    previewRef.current?.seek?.(seq[0]);
+    previewRef.current?.redraw?.();
+  };
+  const goPrev = () => {
+    const seq = ensureSequence();
+    if (!seq.length) return;
+    playPosRef.current = (playPosRef.current - 1 + seq.length) % seq.length;
+    previewRef.current?.seek?.(seq[playPosRef.current]);
+    previewRef.current?.redraw?.();
+  };
+  const goNext = () => {
+    const seq = ensureSequence();
+    if (!seq.length) return;
+    playPosRef.current = (playPosRef.current + 1) % seq.length;
+    previewRef.current?.seek?.(seq[playPosRef.current]);
+    previewRef.current?.redraw?.();
+  };
+  const goLast = () => {
+    const seq = ensureSequence();
+    if (!seq.length) return;
+    playPosRef.current = seq.length - 1;
+    previewRef.current?.seek?.(seq[seq.length - 1]);
+    previewRef.current?.redraw?.();
+  };
 
   return (
     <div
@@ -382,9 +480,8 @@ const TimelinePanel = ({
             Timeline (collapsed)
           </div>
         ) : (
-          // === Two-column grid: left 3/4 timeline, right 1/4 preview ===
           <div className="grid grid-cols-4 gap-4 items-start">
-            {/* LEFT: 3/4 — existing timeline UI (unchanged logic, just wrapped) */}
+            {/* LEFT */}
             <div className="col-span-3 min-w-0">
               {/* Transport */}
               <div className="w-full flex items-center justify-center">
@@ -394,13 +491,13 @@ const TimelinePanel = ({
                       key: "first",
                       icon: assets.firstFrameIcon,
                       title: "Go to first frame",
-                      onClick: () => {},
+                      onClick: goFirst,
                     },
                     {
                       key: "prev",
                       icon: assets.prevFrameIcon,
                       title: "Go to previous frame",
-                      onClick: () => {},
+                      onClick: goPrev,
                     },
                     {
                       key: "play",
@@ -412,29 +509,26 @@ const TimelinePanel = ({
                       key: "next",
                       icon: assets.nextFrameIcon,
                       title: "Go to next frame",
-                      onClick: () => {},
+                      onClick: goNext,
                     },
                     {
                       key: "last",
                       icon: assets.lastFrameIcon,
                       title: "Go to last frame",
-                      onClick: () => {},
+                      onClick: goLast,
                     },
                   ].map((btn) => (
                     <button
                       key={btn.key}
                       className={[
                         "w-8 h-8 rounded border border-[#cfe0f1] bg-white flex items-center justify-center",
-                        transportDisabled
+                        !selectedAnimId
                           ? "opacity-45 cursor-not-allowed"
                           : "hover:bg-[#eef6ff]",
                       ].join(" ")}
                       title={btn.title}
-                      disabled={transportDisabled}
-                      onClick={() => {
-                        if (transportDisabled) return;
-                        btn.onClick();
-                      }}
+                      disabled={!selectedAnimId}
+                      onClick={() => selectedAnimId && btn.onClick()}
                     >
                       <img
                         src={btn.icon}
@@ -446,7 +540,7 @@ const TimelinePanel = ({
                 </div>
               </div>
 
-              {/* Controls + animations rail (your original content) */}
+              {/* Controls + animations rail */}
               <div className="mt-3 grid grid-cols-[auto,1fr] gap-4 items-start">
                 <div className="shrink-0">
                   <button
@@ -523,7 +617,6 @@ const TimelinePanel = ({
                                 Add frame
                               </button>
 
-                              {/* Loop mode toggle (between Add & Delete) */}
                               <button
                                 aria-label="Toggle loop mode"
                                 className="w-6 h-6 rounded-md border border-[#cfe0f1] bg-white flex items-center justify-center hover:bg-[#eef6ff]"
@@ -653,21 +746,19 @@ const TimelinePanel = ({
               </div>
             </div>
 
-            {/* RIGHT: 1/4 — Preview window (display-only, onion skin capable) */}
+            {/* RIGHT: Preview */}
             <div className="col-span-1 min-w-0">
               <PreviewWindow
                 ref={previewRef}
-                frames={previewFrames}
+                frames={[]} // actual frames fed via effect above based on selection
                 width={previewWidth}
                 height={previewHeight}
                 title="Preview"
-                onion={{
-                  enabled: true,
-                  prev: 2,
-                  next: 2,
-                  fade: 0.5,
-                  mode: "tint",
-                }}
+                // onion-skin OFF by default (only the current frame is shown)
+                onion={{ enabled: false }}
+                displayScale={8}
+                fps={fps}
+                onFpsChange={(v) => setFps(Math.max(1, Math.min(120, v | 0)))}
                 className="w-full"
                 onRegisterPreviewAPI={onRegisterPreviewAPI}
               />

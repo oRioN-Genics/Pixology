@@ -14,9 +14,7 @@ const nextLoopMode = (m) => {
 };
 
 const DEFAULT_FPS = 8;
-
-// ***** FIXED PREVIEW VIEWPORT SIZE *****
-const PREVIEW_SIZE = 160;
+const PREVIEW_SIZE = 160; // fixed preview box
 
 const TimelinePanel = ({
   className = "",
@@ -25,7 +23,7 @@ const TimelinePanel = ({
   initialAnimations = [],
   onExposeTimelineAPI,
 
-  // supplied from CanvasBoard (not used for viewport sizing anymore)
+  // preview props (provided from CanvasBoard)
   previewFrames = [],
   previewWidth = 128,
   previewHeight = 128,
@@ -78,37 +76,34 @@ const TimelinePanel = ({
   }, [initialAnimations]);
 
   useEffect(() => {
-    if (onExposeTimelineAPI) {
-      const api = {
-        collectTimelineSnapshot: () =>
-          (animsRef.current || []).map((a) => ({
-            id: a.id,
-            name: a.name,
-            frames: a.frames.slice(),
-            loopMode: a.loopMode || "forward",
-          })),
-        loadFromTimelineSnapshot: (arr) => {
-          const next = (Array.isArray(arr) ? arr : []).map((a) => ({
-            id: a.id || makeId(),
-            name: a.name || "untitled animation",
-            frames: Array.isArray(a.frames) ? a.frames.slice() : [],
-            loopMode: a.loopMode || "forward",
-          }));
-          setAnims(next);
+    if (!onExposeTimelineAPI) return;
+    const api = {
+      collectTimelineSnapshot: () =>
+        (animsRef.current || []).map((a) => ({
+          id: a.id,
+          name: a.name,
+          frames: a.frames.slice(),
+          loopMode: a.loopMode || "forward",
+        })),
+      loadFromTimelineSnapshot: (arr) => {
+        const next = (Array.isArray(arr) ? arr : []).map((a) => ({
+          id: a.id || makeId(),
+          name: a.name || "untitled animation",
+          frames: Array.isArray(a.frames) ? a.frames.slice() : [],
+          loopMode: a.loopMode || "forward",
+        }));
+        setAnims(next);
 
-          const untitledNums = next
-            .map((a) => a.name?.match(/^untitled animation\s+(\d+)$/i)?.[1])
-            .filter(Boolean)
-            .map((s) => parseInt(s, 10))
-            .filter((n) => Number.isFinite(n));
-          setUntitledIdx(
-            untitledNums.length ? Math.max(...untitledNums) + 1 : 1
-          );
-        },
-        getPreviewAPI: () => previewRef.current || null,
-      };
-      onExposeTimelineAPI(api);
-    }
+        const untitledNums = next
+          .map((a) => a.name?.match(/^untitled animation\s+(\d+)$/i)?.[1])
+          .filter(Boolean)
+          .map((s) => parseInt(s, 10))
+          .filter((n) => Number.isFinite(n));
+        setUntitledIdx(untitledNums.length ? Math.max(...untitledNums) + 1 : 1);
+      },
+      getPreviewAPI: () => previewRef.current || null,
+    };
+    onExposeTimelineAPI(api);
   }, [onExposeTimelineAPI]);
 
   useEffect(() => {
@@ -240,9 +235,10 @@ const TimelinePanel = ({
       }
 
       setAnims((prev) =>
-        prev.map((a) =>
-          a.id !== animId ? a : { ...a, frames: [...a.frames, num] }
-        )
+        prev.map((a) => {
+          if (a.id !== animId) return a;
+          return { ...a, frames: [...a.frames, num] };
+        })
       );
       return true;
     } finally {
@@ -259,34 +255,41 @@ const TimelinePanel = ({
     setSelection({ animId: anim.id, frameNum, _idx: occIdx });
     setSelectedAnimId(anim.id);
   };
+
   const onFrameDragOver = (e) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
   };
+
   const onFrameDropOnChip = (e, targetAnimId, targetFrameNum) => {
     e.preventDefault();
     const info = dragInfo.current;
     dragInfo.current = null;
-    if (!info || info.animId !== targetAnimId) return;
+    if (!info) return;
+    if (info.animId !== targetAnimId) return;
 
     setAnims((prev) =>
       prev.map((a) => {
         if (a.id !== targetAnimId) return a;
+
         const cur = a.frames.slice();
         const fromIdx = cur.indexOf(info.frameNum);
         const toIdx = cur.indexOf(targetFrameNum);
         if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return a;
+
         const [moved] = cur.splice(fromIdx, 1);
         cur.splice(toIdx, 0, moved);
         return { ...a, frames: cur };
       })
     );
   };
+
   const onFrameDropAtEnd = (e, targetAnimId) => {
     e.preventDefault();
     const info = dragInfo.current;
     dragInfo.current = null;
-    if (!info || info.animId !== targetAnimId) return;
+    if (!info) return;
+    if (info.animId !== targetAnimId) return;
 
     setAnims((prev) =>
       prev.map((a) => {
@@ -311,12 +314,12 @@ const TimelinePanel = ({
     );
   };
 
-  // Only feed frames when a block is selected; otherwise clear it.
+  // Feed preview only when a block is selected; otherwise clear it.
   useEffect(() => {
     if (!previewRef.current) return;
     if (!selectedAnimId) {
       previewRef.current.setFrames([]);
-      previewRef.current.redraw?.();
+      previewRef.current.redraw?.(); // clear
       return;
     }
     previewRef.current.setFrames(previewFrames || []);
@@ -327,7 +330,7 @@ const TimelinePanel = ({
     if (onRegisterPreviewAPI) onRegisterPreviewAPI(previewRef.current || null);
   }, [onRegisterPreviewAPI]);
 
-  // ===== PLAY/STOP =====
+  // ===== PLAYBACK via requestAnimationFrame (no per-frame React state) =====
   const buildPlaySequence = useMemo(() => {
     return (anim, totalFrames) => {
       if (!anim) return [];
@@ -336,26 +339,30 @@ const TimelinePanel = ({
         .map((n) => (Number.isFinite(n) ? n | 0 : 0))
         .map((n) => n - 1)
         .filter((i) => i >= 0 && i < totalFrames);
+
       if (!base.length) return [];
 
       const mode = anim.loopMode || "forward";
       if (mode === "forward") return base;
       if (mode === "backward") return [...base].reverse();
       if (base.length === 1) return base;
+
       const head = base;
       const tail = [...base].slice(1, -1).reverse();
       return [...head, ...tail];
     };
   }, []);
 
-  const playTimerRef = useRef(null);
   const playSeqRef = useRef([]);
   const playPosRef = useRef(0);
+  const rafIdRef = useRef(null);
+  const lastTsRef = useRef(0);
+  const accRef = useRef(0);
 
   const stopPlayback = () => {
-    if (playTimerRef.current) {
-      clearInterval(playTimerRef.current);
-      playTimerRef.current = null;
+    if (rafIdRef.current) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
     }
   };
 
@@ -375,6 +382,7 @@ const TimelinePanel = ({
 
   useEffect(() => {
     ensureSequence();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedAnimId, anims, previewFrames]);
 
   useEffect(() => {
@@ -388,25 +396,37 @@ const TimelinePanel = ({
       return;
     }
 
-    const useFps = Math.max(1, Number.isFinite(fps) ? fps : DEFAULT_FPS);
-    const interval = Math.max(1, Math.round(1000 / useFps));
+    lastTsRef.current = 0;
+    accRef.current = 0;
 
-    previewRef.current?.seek?.(seq[playPosRef.current] ?? 0);
-    previewRef.current?.redraw?.();
+    const loop = (ts) => {
+      if (!lastTsRef.current) lastTsRef.current = ts;
+      const dt = ts - lastTsRef.current;
+      lastTsRef.current = ts;
 
-    playTimerRef.current = setInterval(() => {
-      const l = seq.length;
-      playPosRef.current = (playPosRef.current + 1) % l;
-      const globalIndex = seq[playPosRef.current] ?? 0;
-      previewRef.current?.seek?.(globalIndex);
+      const msPerFrame = Math.max(1, Math.round(1000 / Math.max(1, fps)));
+      accRef.current += dt;
+
+      while (accRef.current >= msPerFrame) {
+        const l = seq.length;
+        playPosRef.current = (playPosRef.current + 1) % l;
+        const globalIndex = seq[playPosRef.current] ?? 0;
+        previewRef.current?.seek?.(globalIndex);
+        accRef.current -= msPerFrame;
+      }
+      // only one explicit redraw per RAF tick
       previewRef.current?.redraw?.();
-    }, interval);
+      rafIdRef.current = requestAnimationFrame(loop);
+    };
 
+    rafIdRef.current = requestAnimationFrame(loop);
     return stopPlayback;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPlaying, fps]);
 
   useEffect(() => stopPlayback, []);
 
+  // Transport (first/prev/next/last) — use preview API directly
   const goFirst = () => {
     const seq = ensureSequence();
     if (!seq.length) return;
@@ -435,6 +455,8 @@ const TimelinePanel = ({
     previewRef.current?.seek?.(seq[seq.length - 1]);
     previewRef.current?.redraw?.();
   };
+
+  const transportDisabled = !selectedAnimId;
 
   return (
     <div
@@ -505,13 +527,13 @@ const TimelinePanel = ({
                       key={btn.key}
                       className={[
                         "w-8 h-8 rounded border border-[#cfe0f1] bg-white flex items-center justify-center",
-                        !selectedAnimId
+                        transportDisabled
                           ? "opacity-45 cursor-not-allowed"
                           : "hover:bg-[#eef6ff]",
                       ].join(" ")}
                       title={btn.title}
-                      disabled={!selectedAnimId}
-                      onClick={() => selectedAnimId && btn.onClick()}
+                      disabled={transportDisabled}
+                      onClick={() => !transportDisabled && btn.onClick()}
                     >
                       <img
                         src={btn.icon}
@@ -729,19 +751,19 @@ const TimelinePanel = ({
               </div>
             </div>
 
-            {/* RIGHT: Preview (FIXED SIZE) */}
+            {/* RIGHT: fixed-size Preview */}
             <div className="col-span-1 min-w-0">
               <PreviewWindow
                 ref={previewRef}
-                frames={[]} // frames fed via effect when selected
-                width={PREVIEW_SIZE} // <-- fixed viewport width
-                height={PREVIEW_SIZE} // <-- fixed viewport height
+                frames={[]} // fed via effect (only when an animation is selected)
+                width={PREVIEW_SIZE}
+                height={PREVIEW_SIZE}
                 title="Preview"
-                onion={{ enabled: false }} // show only current frame
-                displayScale={1} // no extra scaling
+                onion={{ enabled: false }}
+                displayScale={1}
                 fps={fps}
                 onFpsChange={(v) => setFps(Math.max(1, Math.min(120, v | 0)))}
-                className="" // don't stretch
+                className=""
                 onRegisterPreviewAPI={onRegisterPreviewAPI}
               />
             </div>

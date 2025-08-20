@@ -35,6 +35,13 @@ const CanvasBoard = () => {
   const [mode, setMode] = useState("static"); // 'static' | 'animations'
   const [framesCount, setFramesCount] = useState(0);
 
+  // AUTO-DISMISS TOASTS (2.5s)
+  useEffect(() => {
+    if (!toastMsg) return;
+    const t = setTimeout(() => setToastMsg(""), 2500);
+    return () => clearTimeout(t);
+  }, [toastMsg]);
+
   // ===== Static-mode layers =====
   const [layers, setLayers] = useState([
     { id: "l1", name: "Layer 1", visible: true, locked: false },
@@ -255,7 +262,7 @@ const CanvasBoard = () => {
 
   const handlePushHistoryFromCanvas = (entry) => pushHistory(entry);
 
-  // ---------- SAVE----------
+  // ---------- SAVE (unchanged) ----------
   const getUser = () => {
     try {
       return JSON.parse(localStorage.getItem("pixology:user") || "null");
@@ -281,7 +288,6 @@ const CanvasBoard = () => {
     return `${stem} (${n})`;
   };
 
-  // ---- Static save ----
   const saveProject = async () => {
     const user = getUser();
     if (!user) return setToastMsg("Please log in to save.");
@@ -384,7 +390,6 @@ const CanvasBoard = () => {
       return setToastMsg("Nothing to save yet — draw something first.");
     }
 
-    // timeline blocks snapshot (includes loopMode via TimelinePanel)
     const timeline = timelineApiRef.current?.collectTimelineSnapshot?.() || [];
 
     const method = projectId ? "PUT" : "POST";
@@ -466,7 +471,7 @@ const CanvasBoard = () => {
     setToastMsg("Too many attempts. Please try a different name.");
   };
 
-  // ---------- LOAD EXISTING PROJECT ----------
+  // ---------- LOAD EXISTING PROJECT (unchanged) ----------
   useEffect(() => {
     const user = getUser();
     if (!user || !projectId) return;
@@ -474,7 +479,6 @@ const CanvasBoard = () => {
     let cancelled = false;
     (async () => {
       try {
-        // Try STATIC first
         const res = await fetch(`/api/projects/${projectId}?userId=${user.id}`);
         if (res.ok) {
           const p = await res.json();
@@ -506,7 +510,6 @@ const CanvasBoard = () => {
           return;
         }
 
-        // If NOT found as static, try ANIMATION
         if (res.status === 404) {
           const resAnim = await fetch(
             `/api/projects/animations/${projectId}?userId=${user.id}`
@@ -535,7 +538,6 @@ const CanvasBoard = () => {
             previewPng: pa.previewPng || null,
           };
 
-          // timeline animations from backend (already contain loopMode if present)
           setInitialTimelineAnims(pa.animations || []);
 
           if (animRailApiRef.current?.loadFromAnimationSnapshot) {
@@ -546,7 +548,6 @@ const CanvasBoard = () => {
           return;
         }
 
-        // Other error
         const t = await res.text();
         throw new Error(t || "Failed to load project.");
       } catch (e) {
@@ -559,14 +560,12 @@ const CanvasBoard = () => {
     };
   }, [projectId]);
 
-  // When the rail API becomes available, flush any pending animation snapshot.
   const handleExposeRailAPI = (api) => {
     animRailApiRef.current = api || null;
     if (api && pendingAnimSnapshotRef.current) {
       api.loadFromAnimationSnapshot?.(pendingAnimSnapshotRef.current);
       pendingAnimSnapshotRef.current = null;
     }
-    // Build initial preview frames when rail is ready
     rebuildAnimPreviewFrames();
   };
 
@@ -599,50 +598,35 @@ const CanvasBoard = () => {
     const snap = rail.collectAnimationSnapshot();
     const frames = Array.isArray(snap?.frames) ? snap.frames : [];
 
-    // Build an array of draw functions (transparent background)
     const fns = frames.map((f) => {
       const layersArr = f.layers || [];
       return (ctx, previewW, previewH) => {
-        // scale-to-fit (keeps old behaviour if previewW/H === width/height)
         const scaleX = previewW / width;
         const scaleY = previewH / height;
         const scale = Math.min(scaleX, scaleY) || 1;
-
-        // optional centering if preview is larger than logical grid
         const dx = Math.max(0, Math.floor((previewW - width * scale) / 2));
         const dy = Math.max(0, Math.floor((previewH - height * scale) / 2));
 
-        renderLayersToCtx(
-          ctx,
-          layersArr,
-          width,
-          height,
-          dx,
-          dy,
-          scale,
-          false // transparent background
-        );
+        renderLayersToCtx(ctx, layersArr, width, height, dx, dy, scale, false);
       };
     });
 
     setAnimPreviewFrames(fns);
   };
 
-  // Rebuild preview frames when the count or canvas size changes
   useEffect(() => {
     if (mode !== "animations") return;
     rebuildAnimPreviewFrames();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [framesCount, width, height, mode]);
 
-  // Also rebuild when active frame's layers meta changes (best-effort trigger)
   useEffect(() => {
     if (mode !== "animations") return;
     rebuildAnimPreviewFrames();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [animLayers, animSelectedLayerId, mode]);
 
-  // ---------- EXPORT ----------
+  // ---------- EXPORT (unchanged) ----------
   const renderSnapshotToDataURL = (
     snapshot,
     format = "png",
@@ -720,7 +704,6 @@ const CanvasBoard = () => {
       const dx = c * w * scale;
       const dy = r * h * scale;
 
-      // draw one frame
       const ordered = [...(f.layers || [])].reverse();
       for (const ly of ordered) {
         if (ly.visible === false) continue;

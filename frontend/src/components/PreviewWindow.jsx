@@ -15,7 +15,7 @@ const PreviewWindow = forwardRef(
       height = 128,
       pixelPerfect = true,
       onion = {
-        enabled: false,
+        enabled: false, // OFF by default
         prev: 0,
         next: 0,
         fade: 0.5,
@@ -26,22 +26,31 @@ const PreviewWindow = forwardRef(
       title = "Preview",
       className = "",
       onRegisterPreviewAPI,
-      displayScale = 1, // <-- keep 1 so the outer size is fixed
+
+      // purely visual outer scaling (kept for compatibility)
+      displayScale = 6,
+
+      // toolbar FPS (render-only control; actual timing handled in Timeline)
       fps,
       onFpsChange,
     },
     ref
   ) => {
-    const [current, setCurrent] = useState(0);
-    const [sources, setSources] = useState(frames);
+    // NOTE: no state updates per-frame; we draw directly to canvas
     const canvasRef = useRef(null);
+    const sourcesRef = useRef(Array.isArray(frames) ? frames : []);
+    const currentRef = useRef(0);
 
+    // keep in sync if the prop changes; reset index and redraw
     useEffect(() => {
-      setSources(frames || []);
-      setCurrent(0);
+      sourcesRef.current = Array.isArray(frames) ? frames : [];
+      currentRef.current = 0;
+      drawComposite(0);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [frames]);
 
-    const frameCount = sources?.length ?? 0;
+    const frameCount = () => sourcesRef.current.length;
+
     const cfg = useMemo(
       () => ({
         enabled: false,
@@ -66,14 +75,12 @@ const PreviewWindow = forwardRef(
       ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
 
       if (typeof item === "function") {
-        // Functions (from CanvasBoard) already scale the grid to fit width/height.
         item(ctx, width, height);
       } else if (
         item instanceof HTMLCanvasElement ||
         (typeof ImageBitmap !== "undefined" && item instanceof ImageBitmap) ||
         item instanceof HTMLImageElement
       ) {
-        // Bitmaps: draw stretched to the viewport
         ctx.drawImage(item, 0, 0, width, height);
       }
 
@@ -93,97 +100,108 @@ const PreviewWindow = forwardRef(
       if (!ctx) return;
 
       ctx.clearRect(0, 0, cvs.width, cvs.height);
-      if (!frameCount) return;
 
+      const count = frameCount();
+      if (!count) return;
+
+      const idxNorm = ((index % count) + count) % count;
+
+      // prev ghosts
       if (cfg.enabled && cfg.prev > 0) {
         for (let i = cfg.prev; i >= 1; i--) {
-          const idx = (index - i + frameCount) % frameCount;
+          const idx = (idxNorm - i + count) % count;
           const falloff = Math.pow(1 - cfg.fade, i);
           const alpha = 0.6 * falloff;
           const tint = cfg.mode === "tint" ? cfg.prevTint : null;
-          drawOne(ctx, sources[idx], cfg.mode === "alpha" ? alpha : 1, tint);
+          drawOne(
+            ctx,
+            sourcesRef.current[idx],
+            cfg.mode === "alpha" ? alpha : 1,
+            tint
+          );
         }
       }
 
-      drawOne(ctx, sources[index], 1, null);
+      // current
+      drawOne(ctx, sourcesRef.current[idxNorm], 1, null);
 
+      // next ghosts
       if (cfg.enabled && cfg.next > 0) {
         for (let i = 1; i <= cfg.next; i++) {
-          const idx = (index + i) % frameCount;
+          const idx = (idxNorm + i) % count;
           const falloff = Math.pow(1 - cfg.fade, i);
           const alpha = 0.6 * falloff;
           const tint = cfg.mode === "tint" ? cfg.nextTint : null;
-          drawOne(ctx, sources[idx], cfg.mode === "alpha" ? alpha : 1, tint);
+          drawOne(
+            ctx,
+            sourcesRef.current[idx],
+            cfg.mode === "alpha" ? alpha : 1,
+            tint
+          );
         }
       }
     };
 
+    // keep canvas size in sync
     useEffect(() => {
       const cvs = canvasRef.current;
       if (!cvs) return;
       cvs.width = width;
       cvs.height = height;
-      drawComposite(
-        ((current % Math.max(1, frameCount)) + Math.max(1, frameCount)) %
-          Math.max(1, frameCount)
-      );
+      // redraw at current index after resize
+      drawComposite(currentRef.current);
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [width, height]);
 
-    useEffect(() => {
-      if (!frameCount) {
-        const ctx = canvasRef.current?.getContext("2d");
-        if (ctx) ctx.clearRect(0, 0, width, height);
-        return;
-      }
-      const clamped = ((current % frameCount) + frameCount) % frameCount;
-      drawComposite(clamped);
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [current, sources, frameCount, cfg]);
-
+    // expose imperative API without using React state every frame
     const api = useMemo(
       () => ({
         setFrames(newFrames) {
-          setSources(Array.isArray(newFrames) ? newFrames : []);
+          sourcesRef.current = Array.isArray(newFrames) ? newFrames : [];
+          currentRef.current = 0;
+          drawComposite(0);
         },
         seek(index) {
-          setCurrent((_) => index | 0);
+          currentRef.current = index | 0;
+          drawComposite(currentRef.current);
         },
         step(delta) {
-          setCurrent((c) => c + (delta | 0));
+          const count = frameCount() || 1;
+          currentRef.current =
+            (((currentRef.current + (delta | 0)) % count) + count) % count;
+          drawComposite(currentRef.current);
         },
         setOnionSkin(newCfg) {
           Object.assign(cfg, newCfg);
-          drawComposite(
-            ((current % (sources?.length || 1)) + (sources?.length || 1)) %
-              (sources?.length || 1)
-          );
+          drawComposite(currentRef.current);
         },
         resize(w, h) {
           const cvs = canvasRef.current;
           if (!cvs) return;
           cvs.width = w | 0;
           cvs.height = h | 0;
-          drawComposite(current);
+          drawComposite(currentRef.current);
         },
         redraw() {
-          drawComposite(current);
+          drawComposite(currentRef.current);
         },
         get count() {
-          return sources?.length ?? 0;
+          return frameCount();
         },
         get index() {
-          return current;
+          return currentRef.current;
         },
       }),
       // eslint-disable-next-line react-hooks/exhaustive-deps
-      [current, sources, cfg]
+      [cfg]
     );
 
     useImperativeHandle(ref, () => api, [api]);
+
     useEffect(() => {
       onRegisterPreviewAPI?.(api);
-    }, [api]); // eslint-disable-line
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [api]);
 
     const scale = Math.max(1, displayScale | 0);
 
@@ -195,7 +213,7 @@ const PreviewWindow = forwardRef(
           className,
         ].join(" ")}
       >
-        {/* Title bar with FPS box on the right */}
+        {/* Title left; FPS box right */}
         <div className="h-9 px-3 flex items-center justify-between bg-[#eaf4ff] text-[#2b4a6a] border-b border-[#d7e5f3]">
           <span className="text-sm font-semibold">{title}</span>
 
@@ -224,13 +242,13 @@ const PreviewWindow = forwardRef(
           )}
         </div>
 
-        {/* Checkerboard viewport */}
+        {/* Content */}
         <div className="p-2 bg-[#f5f0f7]">
           <div className="mx-auto max-w-max border-2 border-[#cfe0f1] bg-white">
             <div
               className="relative"
               style={{
-                width: width * scale, // outer size stays fixed
+                width: width * scale,
                 height: height * scale,
                 backgroundSize: "16px 16px",
                 backgroundImage:

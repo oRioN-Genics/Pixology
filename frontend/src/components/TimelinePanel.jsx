@@ -52,9 +52,9 @@ const TimelinePanel = ({
   const previewRef = useRef(null);
 
   const chipRefs = useRef(new Map());
-  const chipSeqRef = useRef([]);
   const lastPlayingChipRef = useRef(null);
 
+  // --- highlight helpers ---
   const applyPlayingStyle = (el) => {
     if (!el) return;
     el.style.outline = "3px solid #f8b84c";
@@ -72,12 +72,13 @@ const TimelinePanel = ({
     arr[posIdx] = el || null;
     chipRefs.current.set(animId, arr);
   };
-  const updatePlayingHighlight = (posIndexInSeq) => {
+  // IMPORTANT: updatePlayingHighlight now uses the unified sequence to resolve the chip position
+  const updatePlayingHighlight = (seqIndex) => {
     const animId = selectedAnimId;
     if (!animId) return;
 
-    const chipOrder = chipSeqRef.current || [];
-    const chipPos = chipOrder[posIndexInSeq];
+    const order = unifiedSeqRef.current.order || [];
+    const chipPos = order[seqIndex]; // chip index inside anim.frames
     const list = chipRefs.current.get(animId) || [];
     const el = typeof chipPos === "number" ? list[chipPos] : null;
 
@@ -380,47 +381,65 @@ const TimelinePanel = ({
     if (onRegisterPreviewAPI) onRegisterPreviewAPI(previewRef.current || null);
   }, [onRegisterPreviewAPI]);
 
-  // ===== PLAYBACK =====
-  const buildPlaySequence = useMemo(() => {
+  // ======================
+  //   UNIFIED SEQUENCER
+  // ======================
+
+  // Build 0..L-1 then L-2..1 (no double-hit of endpoints)
+  const makePingPongOrder = (L) => {
+    if (L <= 1) return [0];
+    const forward = Array.from({ length: L }, (_, i) => i);
+    const back = Array.from(
+      { length: Math.max(0, L - 2) },
+      (_, i) => L - 2 - i
+    );
+    return forward.concat(back);
+  };
+
+  // One source of truth for both playback and highlight:
+  // sequence is over CHIP POSITIONS (indices into anim.frames), not global frames.
+  const buildUnifiedSequence = useMemo(() => {
     return (anim, totalFrames) => {
-      if (!anim) return [];
-      const nums = Array.isArray(anim.frames) ? anim.frames : [];
-      const base = nums
-        .map((n) => (Number.isFinite(n) ? n | 0 : 0))
-        .map((n) => n - 1)
-        .filter((i) => i >= 0 && i < totalFrames);
+      if (!anim || !Array.isArray(anim.frames) || !anim.frames.length) {
+        return { entries: [], order: [] };
+      }
 
-      if (!base.length) return [];
+      // entries: per-chip
+      //  - pos: chip index
+      //  - n:   frame number (1-based in UI)
+      //  - gi:  global preview index (0-based) or null if invalid
+      const entries = anim.frames.map((n, pos) => {
+        const gi = Number.isFinite(n) ? (n | 0) - 1 : -1;
+        const valid = gi >= 0 && gi < (totalFrames | 0);
+        return { pos, n, gi: valid ? gi : null };
+      });
+
+      // Keep only valid positions for playback/highlight
+      const validPositions = entries
+        .map((e, i) => (e.gi === null ? null : i))
+        .filter((i) => i !== null);
+
+      if (!validPositions.length) return { entries: [], order: [] };
 
       const mode = anim.loopMode || "forward";
-      if (mode === "forward") return base;
-      if (mode === "backward") return [...base].reverse();
-      if (base.length === 1) return base;
+      let order = [];
+      if (mode === "forward") {
+        order = validPositions;
+      } else if (mode === "backward") {
+        order = [...validPositions].reverse();
+      } else {
+        // pingpong
+        const K = validPositions.length;
+        const pp = makePingPongOrder(K); // over compacted 0..K-1
+        order = pp.map((k) => validPositions[k]); // map back to chip positions
+      }
 
-      const head = base;
-      const tail = [...base].slice(1, -1).reverse();
-      return [...head, ...tail];
+      return { entries, order };
     };
   }, []);
 
-  // Per-anim chip play order (positions, not frame numbers)
-  const buildChipSequence = useMemo(() => {
-    return (anim) => {
-      if (!anim || !Array.isArray(anim.frames) || anim.frames.length === 0)
-        return [];
-      const L = anim.frames.length;
-      const base = Array.from({ length: L }, (_, i) => i);
-
-      const mode = anim.loopMode || "forward";
-      if (mode === "forward") return base;
-      if (mode === "backward") return [...base].reverse();
-      if (L === 1) return base;
-      return [...base, ...base.slice(1, -1).reverse()];
-    };
-  }, []);
-
-  const playSeqRef = useRef([]);
-  const playPosRef = useRef(0);
+  const unifiedSeqRef = useRef({ entries: [], order: [] }); // {entries, order}
+  const playIdxRef = useRef(0); // index inside 'order' array
   const rafIdRef = useRef(null);
   const lastTsRef = useRef(0);
   const accRef = useRef(0);
@@ -435,25 +454,23 @@ const TimelinePanel = ({
   const ensureSequence = () => {
     const anim = anims.find((a) => a.id === selectedAnimId);
     const total = previewRef.current?.count ?? (previewFrames?.length || 0);
-    const seq = buildPlaySequence(anim, total);
-    playSeqRef.current = seq;
+    const pack = buildUnifiedSequence(anim, total); // {entries, order}
+    unifiedSeqRef.current = pack;
 
-    // also compute chip positions sequence for live highlight
-    chipSeqRef.current = buildChipSequence(anim);
-
-    if (seq.length > 0) {
-      playPosRef.current = Math.min(playPosRef.current, seq.length - 1);
-      const idx = playSeqRef.current[playPosRef.current] ?? 0;
-      previewRef.current?.seek?.(idx);
+    if (pack.order.length) {
+      // clamp and seek
+      playIdxRef.current = Math.min(playIdxRef.current, pack.order.length - 1);
+      const pos = pack.order[playIdxRef.current];
+      const gi = pack.entries[pos]?.gi ?? 0;
+      previewRef.current?.seek?.(gi);
       previewRef.current?.redraw?.();
 
-      // try to paint the corresponding chip highlight
-      // (defer a tick to allow refs to mount after render)
-      setTimeout(() => updatePlayingHighlight(playPosRef.current), 0);
+      // sync chip highlight
+      setTimeout(() => updatePlayingHighlight(playIdxRef.current), 0);
     } else {
       clearAnyPlayingHighlight();
     }
-    return seq;
+    return pack.order;
   };
 
   useEffect(() => {
@@ -465,8 +482,8 @@ const TimelinePanel = ({
     stopPlayback();
     if (!isPlaying) return;
 
-    const seq = ensureSequence();
-    if (!seq.length) {
+    const order = ensureSequence();
+    if (!order.length) {
       onToast("No frames in the selected animation.");
       setIsPlaying(false);
       return;
@@ -485,19 +502,19 @@ const TimelinePanel = ({
 
       let advanced = false;
       while (accRef.current >= msPerFrame) {
-        const l = seq.length;
-        playPosRef.current = (playPosRef.current + 1) % l;
-        const globalIndex = seq[playPosRef.current] ?? 0;
-        previewRef.current?.seek?.(globalIndex);
+        const L = unifiedSeqRef.current.order.length;
+        playIdxRef.current = (playIdxRef.current + 1) % L;
+
+        const pos = unifiedSeqRef.current.order[playIdxRef.current];
+        const gi = unifiedSeqRef.current.entries[pos]?.gi ?? 0;
+
+        previewRef.current?.seek?.(gi);
         accRef.current -= msPerFrame;
         advanced = true;
       }
 
-      // only one explicit redraw per RAF tick
       previewRef.current?.redraw?.();
-
-      // update chip highlight when frame advances (or every tick—cheap)
-      if (advanced) updatePlayingHighlight(playPosRef.current);
+      if (advanced) updatePlayingHighlight(playIdxRef.current);
 
       rafIdRef.current = requestAnimationFrame(loop);
     };
@@ -509,38 +526,46 @@ const TimelinePanel = ({
 
   useEffect(() => stopPlayback, []);
 
-  // --------- OLD frame-transport (left intact, now unused by buttons) ---------
+  // --------- transport over unified sequence (kept compatible with your code) ---------
   const goFirst = () => {
-    const seq = ensureSequence();
-    if (!seq.length) return;
-    playPosRef.current = 0;
-    previewRef.current?.seek?.(seq[0]);
+    const order = ensureSequence();
+    if (!order.length) return;
+    playIdxRef.current = 0;
+    const pos = order[0];
+    const gi = unifiedSeqRef.current.entries[pos]?.gi ?? 0;
+    previewRef.current?.seek?.(gi);
     previewRef.current?.redraw?.();
-    updatePlayingHighlight(playPosRef.current);
+    updatePlayingHighlight(playIdxRef.current);
   };
   const goPrev = () => {
-    const seq = ensureSequence();
-    if (!seq.length) return;
-    playPosRef.current = (playPosRef.current - 1 + seq.length) % seq.length;
-    previewRef.current?.seek?.(seq[playPosRef.current]);
+    const order = ensureSequence();
+    if (!order.length) return;
+    playIdxRef.current = (playIdxRef.current - 1 + order.length) % order.length;
+    const pos = order[playIdxRef.current];
+    const gi = unifiedSeqRef.current.entries[pos]?.gi ?? 0;
+    previewRef.current?.seek?.(gi);
     previewRef.current?.redraw?.();
-    updatePlayingHighlight(playPosRef.current);
+    updatePlayingHighlight(playIdxRef.current);
   };
   const goNext = () => {
-    const seq = ensureSequence();
-    if (!seq.length) return;
-    playPosRef.current = (playPosRef.current + 1) % seq.length;
-    previewRef.current?.seek?.(seq[playPosRef.current]);
+    const order = ensureSequence();
+    if (!order.length) return;
+    playIdxRef.current = (playIdxRef.current + 1) % order.length;
+    const pos = order[playIdxRef.current];
+    const gi = unifiedSeqRef.current.entries[pos]?.gi ?? 0;
+    previewRef.current?.seek?.(gi);
     previewRef.current?.redraw?.();
-    updatePlayingHighlight(playPosRef.current);
+    updatePlayingHighlight(playIdxRef.current);
   };
   const goLast = () => {
-    const seq = ensureSequence();
-    if (!seq.length) return;
-    playPosRef.current = seq.length - 1;
-    previewRef.current?.seek?.(seq[seq.length - 1]);
+    const order = ensureSequence();
+    if (!order.length) return;
+    playIdxRef.current = order.length - 1;
+    const pos = order[order.length - 1];
+    const gi = unifiedSeqRef.current.entries[pos]?.gi ?? 0;
+    previewRef.current?.seek?.(gi);
     previewRef.current?.redraw?.();
-    updatePlayingHighlight(playPosRef.current);
+    updatePlayingHighlight(playIdxRef.current);
   };
 
   // --------- NEW: animation-transport (wired to buttons) ---------
@@ -552,7 +577,7 @@ const TimelinePanel = ({
     setSelectedAnimId(id);
     setSelection(null);
     // refresh the highlight after selection switch/layout
-    setTimeout(() => updatePlayingHighlight(playPosRef.current), 0);
+    setTimeout(() => updatePlayingHighlight(playIdxRef.current), 0);
   };
 
   const goFirstAnim = () => {
@@ -597,7 +622,7 @@ const TimelinePanel = ({
           onClick={() => {
             setCollapsed((v) => !v);
             // keep the highlight consistent after layout changes
-            setTimeout(() => updatePlayingHighlight(playPosRef.current), 0);
+            setTimeout(() => updatePlayingHighlight(playIdxRef.current), 0);
           }}
         >
           <span className="text-sm leading-none select-none">
@@ -636,7 +661,7 @@ const TimelinePanel = ({
                       onClick: () => {
                         setIsPlaying((p) => !p);
                         setTimeout(
-                          () => updatePlayingHighlight(playPosRef.current),
+                          () => updatePlayingHighlight(playIdxRef.current),
                           0
                         );
                       },
@@ -714,7 +739,7 @@ const TimelinePanel = ({
                               // refresh highlight after selection switch
                               setTimeout(
                                 () =>
-                                  updatePlayingHighlight(playPosRef.current),
+                                  updatePlayingHighlight(playIdxRef.current),
                                 0
                               );
                             }
@@ -765,7 +790,7 @@ const TimelinePanel = ({
                                   setTimeout(
                                     () =>
                                       updatePlayingHighlight(
-                                        playPosRef.current
+                                        playIdxRef.current
                                       ),
                                     0
                                   );
@@ -784,7 +809,7 @@ const TimelinePanel = ({
                                   setTimeout(
                                     () =>
                                       updatePlayingHighlight(
-                                        playPosRef.current
+                                        playIdxRef.current
                                       ),
                                     0
                                   );
@@ -880,7 +905,7 @@ const TimelinePanel = ({
                                     setTimeout(
                                       () =>
                                         updatePlayingHighlight(
-                                          playPosRef.current
+                                          playIdxRef.current
                                         ),
                                       0
                                     );
@@ -904,7 +929,7 @@ const TimelinePanel = ({
                                       setTimeout(
                                         () =>
                                           updatePlayingHighlight(
-                                            playPosRef.current
+                                            playIdxRef.current
                                           ),
                                         0
                                       );

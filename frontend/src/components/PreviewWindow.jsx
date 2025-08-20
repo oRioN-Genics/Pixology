@@ -4,7 +4,6 @@ import React, {
   useImperativeHandle,
   useMemo,
   useRef,
-  useState,
 } from "react";
 
 const PreviewWindow = forwardRef(
@@ -15,7 +14,7 @@ const PreviewWindow = forwardRef(
       height = 128,
       pixelPerfect = true,
       onion = {
-        enabled: false, // OFF by default
+        enabled: false,
         prev: 0,
         next: 0,
         fade: 0.5,
@@ -26,22 +25,17 @@ const PreviewWindow = forwardRef(
       title = "Preview",
       className = "",
       onRegisterPreviewAPI,
-
-      // purely visual outer scaling (kept for compatibility)
       displayScale = 6,
-
-      // toolbar FPS (render-only control; actual timing handled in Timeline)
       fps,
       onFpsChange,
     },
     ref
   ) => {
-    // NOTE: no state updates per-frame; we draw directly to canvas
+    // no React state per-frame; render straight to canvas
     const canvasRef = useRef(null);
     const sourcesRef = useRef(Array.isArray(frames) ? frames : []);
     const currentRef = useRef(0);
 
-    // keep in sync if the prop changes; reset index and redraw
     useEffect(() => {
       sourcesRef.current = Array.isArray(frames) ? frames : [];
       currentRef.current = 0;
@@ -142,18 +136,15 @@ const PreviewWindow = forwardRef(
       }
     };
 
-    // keep canvas size in sync
     useEffect(() => {
       const cvs = canvasRef.current;
       if (!cvs) return;
       cvs.width = width;
       cvs.height = height;
-      // redraw at current index after resize
       drawComposite(currentRef.current);
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [width, height]);
 
-    // expose imperative API without using React state every frame
     const api = useMemo(
       () => ({
         setFrames(newFrames) {
@@ -213,7 +204,7 @@ const PreviewWindow = forwardRef(
           className,
         ].join(" ")}
       >
-        {/* Title left; FPS box right */}
+        {/* Title + FPS */}
         <div className="h-9 px-3 flex items-center justify-between bg-[#eaf4ff] text-[#2b4a6a] border-b border-[#d7e5f3]">
           <span className="text-sm font-semibold">{title}</span>
 

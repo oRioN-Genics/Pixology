@@ -51,6 +51,53 @@ const TimelinePanel = ({
 
   const previewRef = useRef(null);
 
+  // ---- NEW: refs & helpers for "playing chip" highlight (no React state per frame) ----
+  const chipRefs = useRef(new Map()); // animId -> HTMLElement[] (one per chip position in that anim)
+  const chipSeqRef = useRef([]); // array of chip positions in play order (per selected anim)
+  const lastPlayingChipRef = useRef(null);
+
+  const applyPlayingStyle = (el) => {
+    if (!el) return;
+    // outline avoids clobbering your existing ring used for selection
+    el.style.outline = "3px solid #f8b84c";
+    el.style.outlineOffset = "2px";
+    el.style.transition = "outline 80ms linear";
+  };
+  const clearPlayingStyle = (el) => {
+    if (!el) return;
+    el.style.outline = "";
+    el.style.outlineOffset = "";
+    el.style.transition = "";
+  };
+  const setChipRef = (animId, posIdx, el) => {
+    const arr = chipRefs.current.get(animId) || [];
+    arr[posIdx] = el || null;
+    chipRefs.current.set(animId, arr);
+  };
+  const updatePlayingHighlight = (posIndexInSeq) => {
+    const animId = selectedAnimId;
+    if (!animId) return;
+
+    const chipOrder = chipSeqRef.current || [];
+    const chipPos = chipOrder[posIndexInSeq];
+    const list = chipRefs.current.get(animId) || [];
+    const el = typeof chipPos === "number" ? list[chipPos] : null;
+
+    if (lastPlayingChipRef.current && lastPlayingChipRef.current !== el) {
+      clearPlayingStyle(lastPlayingChipRef.current);
+    }
+    if (el && lastPlayingChipRef.current !== el) {
+      applyPlayingStyle(el);
+    }
+    lastPlayingChipRef.current = el || null;
+  };
+  const clearAnyPlayingHighlight = () => {
+    if (lastPlayingChipRef.current) {
+      clearPlayingStyle(lastPlayingChipRef.current);
+      lastPlayingChipRef.current = null;
+    }
+  };
+
   const didSeedRef = useRef(false);
   useEffect(() => {
     if (didSeedRef.current) return;
@@ -122,6 +169,7 @@ const TimelinePanel = ({
       setUntitledIdx(1);
       setSelectedAnimId(null);
       setSelection(null);
+      clearAnyPlayingHighlight();
     }
   }, [anims.length]);
 
@@ -194,7 +242,10 @@ const TimelinePanel = ({
       setEditingText("");
     }
     if (selection?.animId === animId) setSelection(null);
-    if (selectedAnimId === animId) setSelectedAnimId(null);
+    if (selectedAnimId === animId) {
+      setSelectedAnimId(null);
+      clearAnyPlayingHighlight();
+    }
   };
 
   const startEditName = (anim) => {
@@ -320,6 +371,7 @@ const TimelinePanel = ({
     if (!selectedAnimId) {
       previewRef.current.setFrames([]);
       previewRef.current.redraw?.(); // clear
+      clearAnyPlayingHighlight();
       return;
     }
     previewRef.current.setFrames(previewFrames || []);
@@ -330,7 +382,7 @@ const TimelinePanel = ({
     if (onRegisterPreviewAPI) onRegisterPreviewAPI(previewRef.current || null);
   }, [onRegisterPreviewAPI]);
 
-  // ===== PLAYBACK via requestAnimationFrame (no per-frame React state) =====
+  // ===== PLAYBACK =====
   const buildPlaySequence = useMemo(() => {
     return (anim, totalFrames) => {
       if (!anim) return [];
@@ -353,6 +405,22 @@ const TimelinePanel = ({
     };
   }, []);
 
+  // NEW: per-anim chip play order (positions, not frame numbers)
+  const buildChipSequence = useMemo(() => {
+    return (anim) => {
+      if (!anim || !Array.isArray(anim.frames) || anim.frames.length === 0)
+        return [];
+      const L = anim.frames.length;
+      const base = Array.from({ length: L }, (_, i) => i);
+
+      const mode = anim.loopMode || "forward";
+      if (mode === "forward") return base;
+      if (mode === "backward") return [...base].reverse();
+      if (L === 1) return base;
+      return [...base, ...base.slice(1, -1).reverse()];
+    };
+  }, []);
+
   const playSeqRef = useRef([]);
   const playPosRef = useRef(0);
   const rafIdRef = useRef(null);
@@ -371,11 +439,21 @@ const TimelinePanel = ({
     const total = previewRef.current?.count ?? (previewFrames?.length || 0);
     const seq = buildPlaySequence(anim, total);
     playSeqRef.current = seq;
+
+    // also compute chip positions sequence for live highlight
+    chipSeqRef.current = buildChipSequence(anim);
+
     if (seq.length > 0) {
       playPosRef.current = Math.min(playPosRef.current, seq.length - 1);
       const idx = playSeqRef.current[playPosRef.current] ?? 0;
       previewRef.current?.seek?.(idx);
       previewRef.current?.redraw?.();
+
+      // try to paint the corresponding chip highlight
+      // (defer a tick to allow refs to mount after render)
+      setTimeout(() => updatePlayingHighlight(playPosRef.current), 0);
+    } else {
+      clearAnyPlayingHighlight();
     }
     return seq;
   };
@@ -407,15 +485,22 @@ const TimelinePanel = ({
       const msPerFrame = Math.max(1, Math.round(1000 / Math.max(1, fps)));
       accRef.current += dt;
 
+      let advanced = false;
       while (accRef.current >= msPerFrame) {
         const l = seq.length;
         playPosRef.current = (playPosRef.current + 1) % l;
         const globalIndex = seq[playPosRef.current] ?? 0;
         previewRef.current?.seek?.(globalIndex);
         accRef.current -= msPerFrame;
+        advanced = true;
       }
+
       // only one explicit redraw per RAF tick
       previewRef.current?.redraw?.();
+
+      // update chip highlight when frame advances (or every tick—cheap)
+      if (advanced) updatePlayingHighlight(playPosRef.current);
+
       rafIdRef.current = requestAnimationFrame(loop);
     };
 
@@ -426,13 +511,14 @@ const TimelinePanel = ({
 
   useEffect(() => stopPlayback, []);
 
-  // Transport (first/prev/next/last) — use preview API directly
+  // --------- OLD frame-transport (left intact, now unused by buttons) ---------
   const goFirst = () => {
     const seq = ensureSequence();
     if (!seq.length) return;
     playPosRef.current = 0;
     previewRef.current?.seek?.(seq[0]);
     previewRef.current?.redraw?.();
+    updatePlayingHighlight(playPosRef.current);
   };
   const goPrev = () => {
     const seq = ensureSequence();
@@ -440,6 +526,7 @@ const TimelinePanel = ({
     playPosRef.current = (playPosRef.current - 1 + seq.length) % seq.length;
     previewRef.current?.seek?.(seq[playPosRef.current]);
     previewRef.current?.redraw?.();
+    updatePlayingHighlight(playPosRef.current);
   };
   const goNext = () => {
     const seq = ensureSequence();
@@ -447,6 +534,7 @@ const TimelinePanel = ({
     playPosRef.current = (playPosRef.current + 1) % seq.length;
     previewRef.current?.seek?.(seq[playPosRef.current]);
     previewRef.current?.redraw?.();
+    updatePlayingHighlight(playPosRef.current);
   };
   const goLast = () => {
     const seq = ensureSequence();
@@ -454,6 +542,41 @@ const TimelinePanel = ({
     playPosRef.current = seq.length - 1;
     previewRef.current?.seek?.(seq[seq.length - 1]);
     previewRef.current?.redraw?.();
+    updatePlayingHighlight(playPosRef.current);
+  };
+
+  // --------- NEW: animation-transport (wired to buttons) ---------
+  const selectAnimByIndex = (index) => {
+    if (!anims.length) return;
+    const clamped = Math.max(0, Math.min(anims.length - 1, index));
+    const id = anims[clamped]?.id;
+    if (!id) return;
+    setSelectedAnimId(id);
+    setSelection(null);
+    // refresh the highlight after selection switch/layout
+    setTimeout(() => updatePlayingHighlight(playPosRef.current), 0);
+  };
+
+  const goFirstAnim = () => {
+    selectAnimByIndex(0);
+  };
+
+  const goLastAnim = () => {
+    selectAnimByIndex(anims.length - 1);
+  };
+
+  const goPrevAnim = () => {
+    if (!selectedAnimId) return;
+    const idx = anims.findIndex((a) => a.id === selectedAnimId);
+    if (idx < 0) return;
+    selectAnimByIndex(Math.max(0, idx - 1));
+  };
+
+  const goNextAnim = () => {
+    if (!selectedAnimId) return;
+    const idx = anims.findIndex((a) => a.id === selectedAnimId);
+    if (idx < 0) return;
+    selectAnimByIndex(Math.min(anims.length - 1, idx + 1));
   };
 
   const transportDisabled = !selectedAnimId;
@@ -473,7 +596,11 @@ const TimelinePanel = ({
           aria-label={collapsed ? "Maximize timeline" : "Minimize timeline"}
           title={collapsed ? "Maximize" : "Minimize"}
           className="absolute right-2 top-2 w-7 h-7 rounded-md border border-[#cfe0f1] bg-white flex items-center justify-center hover:bg-[#eef6ff]"
-          onClick={() => setCollapsed((v) => !v)}
+          onClick={() => {
+            setCollapsed((v) => !v);
+            // keep the highlight consistent after layout changes
+            setTimeout(() => updatePlayingHighlight(playPosRef.current), 0);
+          }}
         >
           <span className="text-sm leading-none select-none">
             {collapsed ? "▴" : "▾"}
@@ -495,45 +622,57 @@ const TimelinePanel = ({
                     {
                       key: "first",
                       icon: assets.firstFrameIcon,
-                      title: "Go to first frame",
-                      onClick: goFirst,
+                      title: "Go to first animation",
+                      onClick: goFirstAnim,
                     },
                     {
                       key: "prev",
                       icon: assets.prevFrameIcon,
-                      title: "Go to previous frame",
-                      onClick: goPrev,
+                      title: "Go to previous animation",
+                      onClick: goPrevAnim,
                     },
                     {
                       key: "play",
                       icon: isPlaying ? assets.stopIcon : assets.playIcon,
                       title: isPlaying ? "Stop" : "Play",
-                      onClick: () => setIsPlaying((p) => !p),
+                      onClick: () => {
+                        setIsPlaying((p) => !p);
+                        // nudge highlight right after toggling
+                        setTimeout(
+                          () => updatePlayingHighlight(playPosRef.current),
+                          0
+                        );
+                      },
                     },
                     {
                       key: "next",
                       icon: assets.nextFrameIcon,
-                      title: "Go to next frame",
-                      onClick: goNext,
+                      title: "Go to next animation",
+                      onClick: goNextAnim,
                     },
                     {
                       key: "last",
                       icon: assets.lastFrameIcon,
-                      title: "Go to last frame",
-                      onClick: goLast,
+                      title: "Go to last animation",
+                      onClick: goLastAnim,
                     },
                   ].map((btn) => (
                     <button
                       key={btn.key}
                       className={[
                         "w-8 h-8 rounded border border-[#cfe0f1] bg-white flex items-center justify-center",
-                        transportDisabled
+                        btn.key === "play"
+                          ? "hover:bg-[#eef6ff]"
+                          : transportDisabled
                           ? "opacity-45 cursor-not-allowed"
                           : "hover:bg-[#eef6ff]",
                       ].join(" ")}
                       title={btn.title}
-                      disabled={transportDisabled}
-                      onClick={() => !transportDisabled && btn.onClick()}
+                      disabled={btn.key !== "play" && transportDisabled}
+                      onClick={() =>
+                        (btn.key === "play" || !transportDisabled) &&
+                        btn.onClick()
+                      }
                     >
                       <img
                         src={btn.icon}
@@ -559,6 +698,8 @@ const TimelinePanel = ({
                 <div className="overflow-x-auto pb-3">
                   <div className="flex gap-4">
                     {anims.map((anim) => {
+                      // reset refs array for this card before mapping its chips
+                      chipRefs.current.set(anim.id, []);
                       const isSelected = selectedAnimId === anim.id;
                       return (
                         <div
@@ -571,7 +712,15 @@ const TimelinePanel = ({
                           onClick={(e) => {
                             const clickedBtn =
                               e.target.closest("button, input");
-                            if (!clickedBtn) setSelectedAnimId(anim.id);
+                            if (!clickedBtn) {
+                              setSelectedAnimId(anim.id);
+                              // refresh highlight after selection switch
+                              setTimeout(
+                                () =>
+                                  updatePlayingHighlight(playPosRef.current),
+                                0
+                              );
+                            }
                           }}
                         >
                           {/* Header */}
@@ -616,6 +765,13 @@ const TimelinePanel = ({
                                   const added = promptAddFrame(anim.id);
                                   if (added) setSelectedAnimId(anim.id);
                                   setSelection(null);
+                                  setTimeout(
+                                    () =>
+                                      updatePlayingHighlight(
+                                        playPosRef.current
+                                      ),
+                                    0
+                                  );
                                 }}
                                 title="Add frame by number"
                               >
@@ -628,6 +784,13 @@ const TimelinePanel = ({
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   toggleLoopMode(anim.id);
+                                  setTimeout(
+                                    () =>
+                                      updatePlayingHighlight(
+                                        playPosRef.current
+                                      ),
+                                    0
+                                  );
                                 }}
                                 title={
                                   anim.loopMode === "backward"
@@ -688,6 +851,7 @@ const TimelinePanel = ({
                                 <div
                                   key={`${n}-${idx}`}
                                   data-frame-chip="1"
+                                  ref={(el) => setChipRef(anim.id, idx, el)}
                                   className={[
                                     "relative select-none cursor-grab active:cursor-grabbing outline-none",
                                     isChipSelected
@@ -715,6 +879,14 @@ const TimelinePanel = ({
                                       frameNum: n,
                                       _idx: occIdx,
                                     });
+                                    // re-assert current highlight
+                                    setTimeout(
+                                      () =>
+                                        updatePlayingHighlight(
+                                          playPosRef.current
+                                        ),
+                                      0
+                                    );
                                   }}
                                   title={`Frame ${n} (click to select, Delete to remove)`}
                                   tabIndex={0}
@@ -732,6 +904,13 @@ const TimelinePanel = ({
                                         frameNum: n,
                                         _idx: occIdx,
                                       });
+                                      setTimeout(
+                                        () =>
+                                          updatePlayingHighlight(
+                                            playPosRef.current
+                                          ),
+                                        0
+                                      );
                                     }
                                   }}
                                 >

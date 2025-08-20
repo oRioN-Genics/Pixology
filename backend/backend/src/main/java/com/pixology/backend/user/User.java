@@ -6,7 +6,7 @@ import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.Instant;
 
-@Document(collection = "Users") // matches your Compass collection name
+@Document(collection = "Users")
 public class User {
     @Id
     private String id;

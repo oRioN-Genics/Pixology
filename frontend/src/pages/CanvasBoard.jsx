@@ -64,7 +64,7 @@ const CanvasBoard = () => {
     [initialTimelineAnims]
   );
 
-  // ===== Preview frames for Timeline (built from rail frames) =====
+  // ===== Preview frames for Timeline =====
   const [animPreviewFrames, setAnimPreviewFrames] = useState([]);
 
   // Pixel canvas API
@@ -262,7 +262,7 @@ const CanvasBoard = () => {
 
   const handlePushHistoryFromCanvas = (entry) => pushHistory(entry);
 
-  // ---------- SAVE (unchanged) ----------
+  // ---------- SAVE ----------
   const getUser = () => {
     try {
       return JSON.parse(localStorage.getItem("pixology:user") || "null");
@@ -471,7 +471,7 @@ const CanvasBoard = () => {
     setToastMsg("Too many attempts. Please try a different name.");
   };
 
-  // ---------- LOAD EXISTING PROJECT (unchanged) ----------
+  // ---------- LOAD EXISTING PROJECT ----------
   useEffect(() => {
     const user = getUser();
     if (!user || !projectId) return;
@@ -626,7 +626,7 @@ const CanvasBoard = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [animLayers, animSelectedLayerId, mode]);
 
-  // ---------- EXPORT (unchanged) ----------
+  // ---------- EXPORT ----------
   const renderSnapshotToDataURL = (
     snapshot,
     format = "png",

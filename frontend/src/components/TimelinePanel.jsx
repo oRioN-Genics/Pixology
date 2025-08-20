@@ -51,14 +51,12 @@ const TimelinePanel = ({
 
   const previewRef = useRef(null);
 
-  // ---- NEW: refs & helpers for "playing chip" highlight (no React state per frame) ----
-  const chipRefs = useRef(new Map()); // animId -> HTMLElement[] (one per chip position in that anim)
-  const chipSeqRef = useRef([]); // array of chip positions in play order (per selected anim)
+  const chipRefs = useRef(new Map());
+  const chipSeqRef = useRef([]);
   const lastPlayingChipRef = useRef(null);
 
   const applyPlayingStyle = (el) => {
     if (!el) return;
-    // outline avoids clobbering your existing ring used for selection
     el.style.outline = "3px solid #f8b84c";
     el.style.outlineOffset = "2px";
     el.style.transition = "outline 80ms linear";
@@ -405,7 +403,7 @@ const TimelinePanel = ({
     };
   }, []);
 
-  // NEW: per-anim chip play order (positions, not frame numbers)
+  // Per-anim chip play order (positions, not frame numbers)
   const buildChipSequence = useMemo(() => {
     return (anim) => {
       if (!anim || !Array.isArray(anim.frames) || anim.frames.length === 0)
@@ -637,7 +635,6 @@ const TimelinePanel = ({
                       title: isPlaying ? "Stop" : "Play",
                       onClick: () => {
                         setIsPlaying((p) => !p);
-                        // nudge highlight right after toggling
                         setTimeout(
                           () => updatePlayingHighlight(playPosRef.current),
                           0
@@ -934,7 +931,7 @@ const TimelinePanel = ({
             <div className="col-span-1 min-w-0">
               <PreviewWindow
                 ref={previewRef}
-                frames={[]} // fed via effect (only when an animation is selected)
+                frames={[]}
                 width={PREVIEW_SIZE}
                 height={PREVIEW_SIZE}
                 title="Preview"

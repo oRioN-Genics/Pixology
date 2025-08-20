@@ -4,10 +4,7 @@ import org.springframework.data.mongodb.core.mapping.Field;
 
 import java.util.List;
 
-/**
- * Embedded layer doc.
- * pixels is a height x width matrix of hex strings or null.
- */
+
 public class ProjectLayer {
     private String id;
     private String name;

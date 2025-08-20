@@ -78,11 +78,6 @@ public class SaveAnimationRequest {
         @NotNull
         private List<Integer> frames; // can be empty
 
-        /**
-         * Looping mode for this block.
-         * Allowed: "forward" | "backward" | "pingpong"
-         * Optional; default "forward" server-side if null/blank.
-         */
         private String loopMode;
 
         public String getId() { return id; }

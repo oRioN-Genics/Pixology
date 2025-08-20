@@ -2,17 +2,12 @@ package com.pixology.backend.project;
 
 import java.util.List;
 
-/** A named animation block on the timeline referencing frames by number (1-based). */
 public class AnimationBlock {
     private String id;
     private String name;
     private List<Integer> frames;
 
-    /**
-     * Looping mode for playback.
-     * Allowed values: "forward" | "backward" | "pingpong"
-     * Defaults to "forward" if null.
-     */
+
     private String loopMode;
 
     public String getId() { return id; }

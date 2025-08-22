@@ -11,6 +11,7 @@ import { assets } from "../assets";
 import CanvasNotch from "../components/CanvasNotch";
 import AnimationFrameRail from "../components/AnimationFrameRail";
 import TimelinePanel from "../components/TimelinePanel";
+import { api } from "../api";
 
 const MAX_HISTORY = 100;
 
@@ -309,7 +310,7 @@ const CanvasBoard = () => {
     while (attempts < 5) {
       try {
         const payload = buildPayload(snapshot, currentName);
-        const res = await fetch(url, {
+        const res = await api(url, {
           method,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -423,7 +424,7 @@ const CanvasBoard = () => {
     while (attempts < 5) {
       try {
         const payload = buildAnimPayload(animSnap, currentName);
-        const res = await fetch(url, {
+        const res = await api(url, {
           method,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -479,7 +480,7 @@ const CanvasBoard = () => {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`/api/projects/${projectId}?userId=${user.id}`);
+        const res = await api(`/api/projects/${projectId}?userId=${user.id}`);
         if (res.ok) {
           const p = await res.json();
           if (cancelled) return;
@@ -511,7 +512,7 @@ const CanvasBoard = () => {
         }
 
         if (res.status === 404) {
-          const resAnim = await fetch(
+          const resAnim = await api(
             `/api/projects/animations/${projectId}?userId=${user.id}`
           );
           if (!resAnim.ok) {

@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import BlueButton from "./BlueButton";
 import { assets } from "../assets";
 import { useNavigate } from "react-router-dom";
+import { api } from "../api";
 
 const LoginFormCard = () => {
   const navigate = useNavigate();
@@ -41,7 +42,7 @@ const LoginFormCard = () => {
 
     setLoading(true);
     try {
-      const res = await fetch("/api/users/login", {
+      const res = await api("/api/users/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),

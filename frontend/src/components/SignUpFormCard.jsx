@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import BlueButton from "./BlueButton";
 import { assets } from "../assets";
 import { useNavigate } from "react-router-dom";
+import { api } from "../api";
 
 const SignUpFormCard = () => {
   const navigate = useNavigate();
@@ -46,7 +47,7 @@ const SignUpFormCard = () => {
 
     setLoading(true);
     try {
-      const res = await fetch("/api/users/register", {
+      const res = await api("/api/users/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),

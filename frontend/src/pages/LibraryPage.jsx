@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import NavBar from "../components/NavBar";
 import AssetTile from "../components/AssetTile";
 import Toast from "../components/Toast";
+import { api } from "../api";
 
 const readUser = () => {
   try {
@@ -47,7 +48,7 @@ const LibraryPage = () => {
         const q = new URLSearchParams({ userId: user.id });
         if (isFavTab) q.set("favorite", "true");
 
-        const res = await fetch(`/api/projects?${q.toString()}`);
+        const res = await api(`/api/projects?${q.toString()}`);
         if (!res.ok) {
           const t = await res.text();
           throw new Error(t || "Failed to fetch projects.");
@@ -100,7 +101,7 @@ const LibraryPage = () => {
     }
 
     try {
-      const res = await fetch(
+      const res = await api(
         `/api/projects/${id}/favorite?userId=${encodeURIComponent(user.id)}`,
         {
           method: "PATCH",
@@ -131,7 +132,7 @@ const LibraryPage = () => {
     if (selectedId === id) setSelectedId(null);
 
     try {
-      const res = await fetch(
+      const res = await api(
         `/api/projects/${id}?userId=${encodeURIComponent(user.id)}`,
         { method: "DELETE" }
       );

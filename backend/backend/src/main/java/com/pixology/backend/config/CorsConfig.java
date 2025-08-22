@@ -13,7 +13,7 @@ public class CorsConfig {
             @Override
             public void addCorsMappings(CorsRegistry registry) {
                 registry.addMapping("/**")
-                        .allowedOrigins("http://pixology-six.vercel.app/")
+                        .allowedOrigins("https://pixology-six.vercel.app")
                         .allowedMethods("GET","POST","PUT","DELETE","PATCH","OPTIONS")
                         .allowedHeaders("*");
             }
